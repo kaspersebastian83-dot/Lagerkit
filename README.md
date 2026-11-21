@@ -11,6 +11,51 @@ die anderen Apps → LagerKit nimmt den Archivordner, den die Projektzentrale ge
 Plan und Entscheidungen: Projekt-Docs `claude/lagerkit-plan.md` (Abschnitt „Entscheidungen Basti (21.11.2026)“ gilt), Mock-up
 „LagerKit – Mock-up“, Stand: `claude/lagerkit-stand.md`.
 
+## 0.2.0 (21.11.2026) – Inventur, Blanko-Etiketten, Entsorgungsliste mit „wohin“
+
+Plan: Projekt-Doc `claude/lagerkit-0.2.0-plan.md`, Teil „0.2.0 – nur LagerKit“ (F1–F6). „Ans Labor geben“ kommt mit 0.3.0.
+
+- **Inventur** (F1, F2): „Mehr … › Inventur …“ oder auf einem Regalplatz „🔍 Diesen Platz prüfen“ (neben „Proben hier einräumen“). Platz-Code
+  scannen → alle Proben darauf scannen → „Platz fertig“; mehrere Plätze in einem Durchgang. Die Leiste heißt **„Prüfen: …“ und ist lila**
+  (Einräumen: „Einräumen auf …“, grün). **Beim Prüfen bucht ein Scan nie um** – auch „Platz fertig“ ändert keine Probe. Ergebnis je Platz:
+  ✓ da · fehlt (→ „als nicht gefunden eintragen“) · woanders gebucht (→ „hierher umbuchen“) · als entsorgt eingetragen (→ „doch da – Eintrag
+  zurücknehmen“) · unbekannter Code (freies Blanko-Etikett → „Neue Rückstellprobe mit diesem Etikett …“); war eine Probe „nicht gefunden“
+  eingetragen und liegt da → „wieder gefunden – eintragen“. Jede Korrektur ist ein Klick mit „Du bist“. Vor „Platz fertig“ liest LagerKit
+  die betroffenen Projekte frisch. Gespeichert in `_LagerKit\Inventuren\<JJJJ-MM-TT>_<Kürzel>.json` (eine Prüfung je Platz, mit den
+  Korrekturen), druckbar (Durchgang und frühere Inventuren). Übersicht: je Regalplatz „zuletzt geprüft MM/JJJJ“.
+- **Erinnerung nach drei Monaten** (F2): ruhige gelbe Zeile „Inventur fällig: … – Regal durchgehen →“, wenn ein benutzter Platz zuletzt
+  vor mehr als drei Monaten geprüft wurde – oder nie, und seine erste Probe liegt seit drei Monaten dort („seit“ = letzte Umbuchung auf den
+  Platz, sonst Erfassen). Sperrt nichts, springt nicht auf; „später“ blendet sie an diesem PC zwei Wochen aus (`localStorage`).
+- **Blanko-Etiketten** (F3, F4): „Mehr … › Blanko-Etiketten drucken …“ – n Etiketten mit Startfeld; schwarzer Balken „RÜCKSTELLPROBE · NICHT
+  ANS LABOR“ + Code, QR (18 mm wie sonst) mit `LKB0001` …, Klarschrift, drei Schreiblinien „Projekt / Was / Datum“ (je ca. 9 mm), Absender.
+  **Erst reservieren, dann drucken:** Der Bereich kommt mit dem sicheren Schreiben in `_LagerKit\Einstellungen.json` (`blankoBereiche`), wird
+  nach dem Zurücklesen und noch einmal kurz danach geprüft; überschneidet er sich mit dem eines anderen PCs, weichen beide auf den nächsten
+  freien Bereich aus (verworfene bleiben stehen). Ein reservierter Bereich kommt nie wieder, auch nicht nach abgebrochenem Druck; jeder PC
+  merkt sich außerdem seine höchste Nummer. Das Druckfenster öffnet sich beim Klick und wird erst nach bestandener Prüfung gefüllt.
+- **Freies Blanko-Etikett scannen** → „Neue Rückstellprobe mit diesem Etikett“: in dieses Projekt / Projekt wählen … (neue Zeile mit der
+  nächsten R-Nummer, wie gewohnt ausfüllen) oder „Herkunft unklar …“ (U-Probe). Der Code steht in `codes` der Probe (`art: "blanko"`), die
+  R-Nummer bleibt die Bezeichnung. Vergeben wird jeder Code genau einmal: Zuordnung in `Einstellungen.json` (`blankoZuordnung`, id = Code),
+  mit dem sicheren Schreiben und einer zweiten Prüfung; ist er schon vergeben, öffnet der Scan diese Probe. Scan, Suche, Inventur und
+  „Fällige einsammeln“ finden die Probe über beide Codes (Index `blanko`, sonst die Zuordnung). Eine U-Probe nimmt ihren Blanko-Code beim
+  Zuordnen ins Projekt mit. Ein LagerKit-Etikett ist danach freiwillig. Eine Probe mit Blanko-Code ist nie „ganz leer“ (stornieren statt löschen).
+- **Entsorgungsliste** (F5, F6): beim Einsammeln je Probe freiwillig „wohin“ (Restmüll · Gefährlicher Abfall / Entsorger · Asbestabfall ·
+  zurück an Auftraggeber · Sonstiges mit Freitext), bei „Asbest nachgewiesen“ vorbelegt „Asbestabfall“, „Für alle markierten: …“; Spalte
+  „wohin“ auch auf der gedruckten Liste. „wohin“ steht im Ereignis `entsorgt` und in `wohin` der Probe. Jedes „Eintragen“ legt einen
+  **festen Beleg** ab: `_LagerKit\Entsorgungslisten\<JJJJ-MM-TT>_<Kürzel>_<lfd>.json` mit genau dem, was die Liste zeigte (wer, wann, je
+  Probe Projekt, Nr., Was, Ort, Platz, entsorgt / nicht gefunden / behalten (verlängert bis …) / gesperrt / offen, wohin, Hinweise, ob
+  eingetragen). Nächste freie laufende Nummer, eine vorhandene Datei wird nie überschrieben, danach nie geändert. „Entsorgt“ in der Übersicht
+  zeigt „Liste vom … · Kürzel · n Proben“; Klick zeigt sie, „Drucken“ druckt sie. Kein PDF-Schreiber – PDF über „Als PDF speichern“ im Druckdialog.
+- Kürzel in Dateinamen nur mit Buchstaben und Ziffern („Dr. Ka“ → `DrKa`).
+
+### 0.1.0-PCs im selben Büro
+
+Projektdatei bleibt Fassung 1. Ein PC mit 0.1.0 verliert beim Zusammenführen nichts (getestet mit dem unveränderten 0.1.0-Kern,
+`tests/alt/kern-0.1.0.js`): `codes`, `wohin`, Ereignisse mit `wohin`/`bei`, Umbuchungen aus der Inventur, `blankoBereiche` und
+`blankoZuordnung` in den Einstellungen bleiben. Was ein 0.1.0-PC nicht kann: LKB-Codes scannen (gilt dort als „kein Code“), „wohin“ und
+Belege beim Einsammeln; schreibt er den Index, fehlen darin Blanko-Code und „seit“, bis ein 0.2.0-PC das Projekt wieder liest (beim Start
+im Hintergrund) – der Scan findet die Probe über die Zuordnung trotzdem. Eine Zeile, die nur einen Blanko-Code hat, könnte er als „leer“
+löschen. Darum alle PCs bald auf 0.2.0 (Seite neu laden).
+
 ## 0.1.0 (21.11.2026) – erste Fassung
 
 - **Lager-Übersicht** (Start ohne Projekt): Kacheln je Regalplatz (Anzahl, fällig; Klick filtert), Suche (Projektnr., Ort, Was – oder
@@ -57,7 +102,9 @@ Plan und Entscheidungen: Projekt-Docs `claude/lagerkit-plan.md` (Abschnitt „En
   (eine je Tag vor dem ersten Schreiben). Projekte vor 26.0560: LagerKit legt dort nur `_Spektron/LagerKit` an, sonst nichts.
   (Bei Spektron-Projekten ergänzt `spektron-ordner.js` wie in jeder App die Hinweisdatei in `_Spektron`, falls sie fehlt.)
 - Archivordner `_LagerKit\`: `Index.json` (Zwischenspeicher, jederzeit neu aufbaubar; unlesbar → wird neu geschrieben),
-  `Ohne-Projekt.json`, `Einstellungen.json` (Standardfrist, Regalplätze). Den Ordner legt LagerKit nach einem Klick an.
+  `Ohne-Projekt.json`, `Einstellungen.json` (Standardfrist, Regalplätze; ab 0.2.0 `blankoBereiche`, `blankoZuordnung`),
+  ab 0.2.0 `Inventuren\<JJJJ-MM-TT>_<Kürzel>.json` und `Entsorgungslisten\<JJJJ-MM-TT>_<Kürzel>_<lfd>.json` (feste Belege, nie geändert).
+  Den Ordner legt LagerKit nach einem Klick an.
 - Gemeinsame Dateien wie LexiKit 0.4.0: neu lesen, zusammenführen (nach id; nur die selbst geänderten Felder, Verlaufslisten werden
   vereinigt), schreiben, nach 1,5 s zurücklesen und prüfen, sonst bis zu viermal; eine unlesbare oder neuere Datei wird nie überschrieben.
   Die Projektdatei wird genauso geschrieben. Jede Datei trägt `format`, `version: 1` und `app`; eine neuere Fassung öffnet nur zum Ansehen.
@@ -70,7 +117,8 @@ Plan und Entscheidungen: Projekt-Docs `claude/lagerkit-plan.md` (Abschnitt „En
 `{ format: 'spektron-lagerkit', version: 1, app, projekt: { nr, ordner }, proben: [ … ], ansLabor: [], gespeichertAm }` – je Probe
 `id, nr, code, codes[], erfasst, erfasstVon, geaendert, was, ort, attribute, art, behaelter, probenahme, probenahmeUnbekannt, von, platz,
 notiz, verdacht, quelle (LabelKit: liste, id, nr, label, titel), nachtraeglich, ausU, wohin, nrFest, storniert, weg` und die Verlaufslisten
-`fristen, sperren (aufgehoben), plaetze, ereignisse (entsorgt, nichtGefunden, entsorgtZurueck), gedruckt, ansLabor`.
+`fristen, sperren (aufgehoben), plaetze, ereignisse (entsorgt – ab 0.2.0 mit `wohin`, nichtGefunden – aus der Inventur mit
+`bei: "inventur"`, entsorgtZurueck, gefunden), gedruckt, ansLabor`; `codes` ab 0.2.0 auch `{ code: "LKB0013", art: "blanko", am, wer }`.
 
 ## Aufbau
 
@@ -93,5 +141,13 @@ INCORPORATED.
   aus LabelKit übernehmen (fremde Datei nie gelesen), Etikett drucken = Nummer fest (QR 18 mm, ≥ 8 pt, nichts ragt heraus), stornieren,
   verlängern mit Grund, Scan im Textfeld, Fällige einsammeln mit Scanner-Stoß, Entsorgungsliste, Eintragen, Entsorgt bleibt sichtbar,
   Regalplatz-Scan mit und ohne „Proben hier einräumen“, Aufräumtag, U-Probe zuordnen, Projekt vor 26.0560, keine fremde Datei geändert.
+- `node tests/kern-020.cjs` (0.2.0) – Inventur-Abgleich (alle Fälle), Erinnerung (drei Monate, nie geprüft, „seit“), LKB-Reservierung mit
+  bis zu drei PCs gleichzeitig und einem 0.1.0-PC dazwischen (gedruckte Bereiche überlappen nie, abgebrochener Druck gibt nichts frei),
+  Blanko-Code genau einmal zuordnen (drei PCs gleichzeitig), Finden über beide Codes, „wohin“-Vorbelegung, Beleg nie überschrieben (auch
+  zwei PCs im selben Augenblick), 0.1.0-Datei ↔ 0.2.0 ohne Verlust (mit dem echten 0.1.0-Kern).
+- `node tests/browser-020.cjs` (0.2.0) – Erinnerung und „später“, Blanko drucken (Maße 97 × 42,3 mm, QR 18 mm, drei Linien, nichts
+  gekürzt) → scannen → im Projekt und als „Herkunft unklar“ erfassen → über beide Codes finden, Einsammeln mit „wohin“ und „behalten“ →
+  Beleg im Ordner → unter „Entsorgt“ anzeigen und drucken (Beleg unverändert), Inventur mit Scanner-Stoß (bucht nie um), Korrekturen per
+  Klick, Inventur-Datei, „zuletzt geprüft“, zweiter Beleg, nur eigene Dateien.
 - Lokal: Repos `berichtkit`, `lexikit`, `projektzentrale` neben `Lagerkit` klonen; `NODE_PATH` auf `playwright` und `jsqr`; `LANG=C.UTF-8`.
   Alle Testdaten sind erfunden.

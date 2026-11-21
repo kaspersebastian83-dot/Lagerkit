@@ -192,6 +192,23 @@ details.klapp[open] > summary{border-bottom:1px solid var(--sp-line)}
 .platzhalter{flex:1}
 .einraeumen{position:sticky;top:66px;z-index:14;background:var(--sp-app-dunkel);color:#fff;border-radius:12px;padding:12px 18px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:17px;font-weight:700}
 .einraeumen .sp-knopf{height:40px;font-weight:700}
+/* Inventur: Leiste „Prüfen“ – andere Farbe und anderes Wort als „Einräumen“ (prüft nur, bucht nie um) */
+.pruefen{position:sticky;top:66px;z-index:14;background:var(--lila-text);color:#fff;border-radius:12px;padding:12px 18px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:17px;font-weight:700}
+.pruefen .sp-knopf{height:40px;font-weight:700}
+.meldung.ruhig{background:var(--gelb-bg);border:1px solid var(--gelb-rand);color:var(--gelb-text)}
+.meldung.ruhig .linkknopf{color:var(--gelb-text);font-size:15px}
+.kachel .gepr{font-size:12px;color:var(--sp-muted)}
+.kachel .gepr.faellig{color:var(--gelb-text);font-weight:600}
+.sp-knopf.klein{height:34px;font-size:13.5px;padding:0 10px}
+.inv-ok{color:var(--sp-ok);font-weight:700}
+.inv-teil{padding:4px 0 8px}
+.inv-teil h3{font-size:14px;margin:10px 18px 4px;letter-spacing:.03em}
+table.liste.inv{table-layout:fixed}
+table.liste.inv td:nth-child(1){width:170px}table.liste.inv td:nth-child(2){width:24%}table.liste.inv td:nth-child(3){width:26%}
+.wohin{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--sp-muted);flex-wrap:wrap}
+.wohin select,.wohin input{height:36px;border:1.5px solid var(--sp-line2);border-radius:8px;padding:0 8px;background:#fff;font-size:14px}
+.belege{display:flex;flex-direction:column;border-bottom:1px solid var(--sp-line);padding-bottom:6px}
+.beleg-zeile{background:none;border:0;border-top:1px solid #eef2f5;text-align:left;padding:9px 18px;font:inherit;font-size:14px;color:var(--sp-app-dunkel);text-decoration:underline}
 /* Einsammeln */
 .sammel{display:flex;flex-direction:column;gap:10px}
 .sk{background:#fff;border-radius:14px;box-shadow:var(--sp-schatten);padding:14px 18px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
@@ -2565,11 +2582,15 @@ const FORMAT = {
   ohne: 'spektron-lagerkit-ohne-projekt',       // _LagerKit\Ohne-Projekt.json
   einst: 'spektron-lagerkit-einstellungen',     // _LagerKit\Einstellungen.json
   index: 'spektron-lagerkit-index',             // _LagerKit\Index.json (nur Zwischenspeicher)
+  inventur: 'spektron-lagerkit-inventur',       // _LagerKit\Inventuren\<JJJJ-MM-TT>_<Kürzel>.json (ab 0.2.0)
+  beleg: 'spektron-lagerkit-entsorgungsliste',  // _LagerKit\Entsorgungslisten\<JJJJ-MM-TT>_<Kürzel>_<lfd>.json (ab 0.2.0, nie geändert)
 };
 const ARTEN = ['Materialprobe', 'Brandschutt/Asche', 'Löschmittel', 'Bohrkern-Rest', 'Wischprobe (Doppel)', 'Brandgeruch-Probe', 'Sonstige'];
 const BEHAELTER = ['Glas', 'Beutel', 'Eimer', 'Kiste'];
 const STANDARD_MONATE = 3;
 const BALD_TAGE = 30;
+const INVENTUR_MONATE = 3;                // Erinnerung „Inventur fällig“ (Plan F2, entschieden 21.11.2026)
+const WOHIN = ['Restmüll', 'Gefährlicher Abfall / Entsorger', 'Asbestabfall', 'zurück an Auftraggeber', 'Sonstiges'];   // Plan F5
 
 /* ---------- Kalendertage ---------- */
 const zwei = n => String(n).padStart(2, '0');
@@ -2593,6 +2614,12 @@ function fristAb(tag, monate) {
 function plusTage(tag, n) {
   const [j, m, d] = tag.split('-').map(Number), x = new Date(Date.UTC(j, m - 1, d + n));
   return x.getUTCFullYear() + '-' + zwei(x.getUTCMonth() + 1) + '-' + zwei(x.getUTCDate());
+}
+/** Tag + n Monate auf den Tag genau (31.08. + 3 → 30.11.) – für die Inventur-Erinnerung */
+function plusMonate(tag, n) {
+  if (!gueltig(tag)) return '';
+  const [j, m, d] = tag.split('-').map(Number), ende = monatsende(j, m - 1 + n);
+  return ende.slice(0, 8) + zwei(Math.min(d, +ende.slice(8)));
 }
 const de = tag => gueltig(tag) ? tag.slice(8, 10) + '.' + tag.slice(5, 7) + '.' + tag.slice(0, 4) : '';
 /** „18.11.2026“, „1.2.26“, „2026-11-18“ → „2026-11-18“; sonst '' */
@@ -2661,21 +2688,23 @@ const AB_KEY = 26 * 1e6 + 560;
 const vorSpektron = nr => { const p = projektNr(nr); return !!p && p.key < AB_KEY; };
 
 /* ---------- Codes (QR, Scanner, Suche) – nur Buchstaben und Ziffern, damit US- und DE-Tastatur gleich tippen ----------
-   LK260612R002 = Projekt 26.0612, R2 · LKU0002 = Herkunft unklar U2 · LKP0001 = Regalplatz Nr. 1 */
+   LK260612R002 = Projekt 26.0612, R2 · LKU0002 = Herkunft unklar U2 · LKP0001 = Regalplatz Nr. 1 · LKB0013 = Blanko-Etikett Nr. 13 (0.2.0) */
 function rCode(nr, n) {
   const p = projektNr(nr); if (!p || !(n >= 1)) return '';
   return 'LK' + p.yy + p.zahl + 'R' + String(n).padStart(3, '0');
 }
 const uCode = n => n >= 1 ? 'LKU' + String(n).padStart(4, '0') : '';
 const pCode = n => n >= 1 ? 'LKP' + String(n).padStart(4, '0') : '';
-const CODE_RE = /LK(?:(\d{2})(\d{2,6})R(\d{3,5})|U(\d{4,6})|P(\d{4,6}))/;
-/** Eingabe (Scan, auch verstümmelt: Groß/klein, Zeichen davor/danach, Leerraum) → { art:'R'|'U'|'P', … } | null */
+const bCode = n => n >= 1 ? 'LKB' + String(n).padStart(4, '0') : '';
+const CODE_RE = /LK(?:(\d{2})(\d{2,6})R(\d{3,5})|U(\d{4,6})|P(\d{4,6})|B(\d{4,6}))/;
+/** Eingabe (Scan, auch verstümmelt: Groß/klein, Zeichen davor/danach, Leerraum) → { art:'R'|'U'|'P'|'B', … } | null */
 function codeLesen(text) {
   const t = String(text || '').normalize('NFKC').toUpperCase().replace(/\s+/g, '');
   const m = CODE_RE.exec(t); if (!m) return null;
   if (m[1]) return { art: 'R', projekt: m[1] + '.' + m[2], nr: +m[3], code: 'LK' + m[1] + m[2] + 'R' + m[3] };
   if (m[4]) return { art: 'U', nr: +m[4], code: 'LKU' + m[4] };
-  return { art: 'P', nr: +m[5], code: 'LKP' + m[5] };
+  if (m[5]) return { art: 'P', nr: +m[5], code: 'LKP' + m[5] };
+  return { art: 'B', nr: +m[6], code: bCode(+m[6]) };
 }
 /** Suche von Hand: „26.0612 R2“, „26.0612-r 2“, „U2“ → wie ein Scan; sonst codeLesen */
 function sucheLesen(text) {
@@ -2709,7 +2738,7 @@ const zufall = () => Math.random().toString(36).slice(2, 10) + Date.now().toStri
 const neueId = () => (root.crypto && root.crypto.randomUUID ? root.crypto.randomUUID() : 'id-' + zufall() + zufall());
 const text = (v, max) => typeof v === 'string' ? v.normalize('NFC').slice(0, max || 400) : '';
 const warumOk = s => (String(s || '').match(/\p{L}/gu) || []).length >= 3;
-const LISTEN = ['fristen', 'sperren', 'plaetze', 'ereignisse', 'gedruckt', 'codes', 'ansLabor', 'umbenannt'];
+const LISTEN = ['fristen', 'sperren', 'plaetze', 'ereignisse', 'gedruckt', 'codes', 'ansLabor', 'umbenannt', 'korrekturen'];
 /** letzter Eintrag nach Zeit (dann id) */
 /** Zeitpunkt in ms (ISO mit oder ohne Millisekunden gleich behandelt); unlesbar = ganz früh */
 const ms = v => { const t = Date.parse(v); return Number.isFinite(t) ? t : -Infinity; };
@@ -2850,6 +2879,8 @@ function laborproben(lk) {
   return aus.sort((a, b) => (a.liste === 'brandgeruchProben') - (b.liste === 'brandgeruchProben') || a.nr - b.nr);
 }
 const quelleKey = q => q ? q.liste + ':' + q.id : '';
+/** Blanko-Codes einer Probe (codes[] mit art „blanko“, Plan F4) */
+const blankoCodes = p => ((p && p.codes) || []).filter(c => c && c.art === 'blanko' && typeof c.code === 'string').map(c => c.code);
 
 /* ---------- Nummern R1, R2 … (Regel wie LabelKit 5.1) ----------
    Fest beim ersten Druck. Danach stornieren statt löschen; eine Nummer wird nie neu vergeben. Eine ganz leere Zeile darf weg –
@@ -2860,7 +2891,7 @@ const festeDa = proben => da(proben).some(istFest);
 const naechsteNr = proben => da(proben).reduce((m, p) => Math.max(m, Number(p.nr) || 0), 0) + 1;
 /** „Ganz leer“: nicht fest, nicht aus LabelKit, kein Text. Was LagerKit selbst vorbelegt (Probenahme, Von, Art, Platz) zählt nicht. */
 function ganzLeer(p) {
-  if (!p || istFest(p) || p.quelle) return false;
+  if (!p || istFest(p) || p.quelle || blankoCodes(p).length) return false;   // mit Blanko-Etikett: der Code ist vergeben → stornieren statt löschen
   return !['was', 'ort', 'attribute', 'notiz', 'behaelter', 'gefunden'].some(k => t2(p[k])) && !p.verdacht && !(p.fristen || []).length && !(p.sperren || []).length;
 }
 function renummerieren(proben, am) {
@@ -2955,6 +2986,8 @@ const DATEIEN = {
   ohne: { format: FORMAT.ohne, feld: 'proben' },
   einst: { format: FORMAT.einst, feld: 'plaetze' },
   index: { format: FORMAT.index, feld: 'projekte' },
+  inventur: { format: FORMAT.inventur, feld: 'pruefungen' },
+  beleg: { format: FORMAT.beleg, feld: 'proben' },
 };
 /** Text → null (keine Datei) | { kaputt, neuer? } | Inhalt */
 function dateiLesen(art, txt) {
@@ -2988,7 +3021,12 @@ function mergen(art, disk, eigene) {
   out[G.feld] = listeMergen(eigene.ersetzen ? [] : base[G.feld], gelegt);
   if (art === 'projekt') { nummernPruefen(out.proben); out.ansLabor = listeMergen(base.ansLabor || [], eigene.ansLabor || []); }
   if (art === 'ohne') nummernPruefen(out.proben);
-  if (art === 'einst') platzNummernPruefen(out.plaetze);
+  if (art === 'einst') {
+    platzNummernPruefen(out.plaetze);
+    // ab 0.2.0: reservierte Blanko-Bereiche und vergebene Blanko-Codes (0.1.0 lässt beide Listen beim Schreiben stehen)
+    if (base.blankoBereiche || eigene.bereiche) out.blankoBereiche = listeMergen(base.blankoBereiche || [], eigene.bereiche || []);
+    if (base.blankoZuordnung || eigene.zuordnung) out.blankoZuordnung = listeMergen(base.blankoZuordnung || [], eigene.zuordnung || []);
+  }
   if (eigene.felder) {   // einzelne Felder (Standardfrist, Projektangaben): die jüngere Änderung gilt
     const f = eigene.felder, d = base.felderGeaendert || {};
     out.felderGeaendert = Object.assign({}, d);
@@ -3001,6 +3039,7 @@ function enthaeltAlles(art, disk, eigene) {
   const G = DATEIEN[art];
   if (!enthaelt(disk[G.feld], eigene.eintraege)) return false;
   if (art === 'projekt' && !enthaelt(disk.ansLabor || [], eigene.ansLabor || [])) return false;
+  if (art === 'einst' && !(enthaelt(disk.blankoBereiche || [], eigene.bereiche || []) && enthaelt(disk.blankoZuordnung || [], eigene.zuordnung || []))) return false;
   if (eigene.felder) { const d = disk.felderGeaendert || {}; for (const k of Object.keys(eigene.felder.werte || {})) if (ms(d[k]) < ms(eigene.felder.am)) return false; }
   return true;
 }
@@ -3035,13 +3074,19 @@ function indexEintrag(lager, info) {
   return { id: info.ordner, ordner: info.ordner, nr: o.nr, ort: o.ort, kuerzel: o.kuerzel, uebergabe: info.uebergabe || '', asbest: [...(info.asbest || [])], gelesen: info.gelesen || new Date().toISOString(),
     geaendert: info.gelesen || new Date().toISOString(), stand: info.stand || null, proben };
 }
+/** Seit wann liegt die Probe auf ihrem jetzigen Platz (Tag)? Letzte Umbuchung dorthin, sonst das Erfassen */
+function seitTag(p) {
+  const u = letzter((p.plaetze || []).filter(x => x && x.nach === p.platz));
+  return berlinTag((u && u.am) || p.erfasstAlsU || p.erfasst || '');
+}
 function kurzProbe(p, ctx, info) {
   const f = frist(p, ctx), s = sperre(p), e = entsorgt(p), ng = nichtGefunden(p);
   const q = p.quelle || null, asb = !!(q && info && info.asbest && info.asbest.has(String(q.label || '').toUpperCase()));
   return { id: p.id, nr: p.nr, code: p.code || '', was: p.was || '', ort: p.ort || '', attribute: p.attribute || '', art: p.art || '', behaelter: p.behaelter || '',
     probenahme: p.probenahme || '', unbekannt: !!p.probenahmeUnbekannt, von: p.von || '', platz: p.platz || '', bis: f.bis, quelle: f.quelle, fristHand: f.hand ? { art: f.hand.art, wer: f.hand.wer } : null,
-    sperre: s ? { wer: s.wer, warum: s.warum, am: s.am } : null, entsorgt: e ? { wer: e.wer, am: e.am } : null, nichtGefunden: ng ? { wer: ng.wer, am: ng.am } : null,
-    asbest: asb, verdacht: !!p.verdacht, rest: q ? q.titel || '' : '', nachtraeglich: !!p.nachtraeglich, festNr: !!p.nrFest, ausU: p.ausU || '' };
+    sperre: s ? { wer: s.wer, warum: s.warum, am: s.am } : null, entsorgt: e ? { wer: e.wer, am: e.am, wohin: e.wohin || p.wohin || '' } : null, nichtGefunden: ng ? { wer: ng.wer, am: ng.am } : null,
+    asbest: asb, verdacht: !!p.verdacht, rest: q ? q.titel || '' : '', nachtraeglich: !!p.nachtraeglich, festNr: !!p.nrFest, ausU: p.ausU || '',
+    blanko: blankoCodes(p), seit: seitTag(p), wohin: p.wohin || '' };
 }
 /** Status aus einem Index-Eintrag (Frist steht schon drin, „heute“ entscheidet) */
 function kurzStatus(k, heute) {
@@ -3066,12 +3111,147 @@ function platzNummernPruefen(plaetze) {
 /** Sortierung wie im Regal: „Regal A · Fach 2“ vor „Regal A · Fach 10“, unbenutzte zuletzt */
 const platzSort = (a, b) => (!!a.nichtMehr - !!b.nichtMehr) || String(a.name).localeCompare(String(b.name), 'de', { numeric: true });
 
+/* ---------- Inventur (Plan F1, F2) ----------
+   erwartet = Übersicht-Einträge, die laut LagerKit auf dem Platz liegen; gescannt = [{ code, k|null, frei }] in Scan-Reihenfolge.
+   Nichts ändert sich von selbst: Das Ergebnis nennt nur, was zu tun wäre – jede Korrektur ist ein eigener Klick mit Namen. */
+const istEntsorgt = k => !!(k && (k.status === 'entsorgt' || k.entsorgt));
+function inventurAbgleich(platzId, erwartet, gescannt) {
+  const aus = { da: [], fehlt: [], woanders: [], entsorgt: [], unbekannt: [] }, gesehen = new Set();
+  for (const g of gescannt || []) {
+    if (!g) continue;
+    const k = g.k;
+    if (!k) { if (!aus.unbekannt.some(u => u.code === g.code)) aus.unbekannt.push({ code: g.code, frei: !!g.frei }); continue; }
+    if (gesehen.has(k.key)) continue;
+    gesehen.add(k.key);
+    if (istEntsorgt(k)) aus.entsorgt.push(k);
+    else if (k.platz === platzId) aus.da.push(k);
+    else aus.woanders.push(k);
+  }
+  for (const k of erwartet || []) if (k && k.platz === platzId && !istEntsorgt(k) && !gesehen.has(k.key)) aus.fehlt.push(k);
+  return aus;
+}
+/** Was von einer Probe in der Inventur-Datei steht (fest, druckbar – auch wenn sich die Probe später ändert) */
+function inventurProbe(k) {
+  return { key: k.key, ordner: k.projekt ? k.projekt.ordner : '', u: !!k.u, id: k.id, titel: k.titel || '', projektNr: k.projekt ? k.projekt.nr || '' : '',
+    was: k.was || '', ort: k.u ? 'gefunden: ' + (k.gefunden || '') : (k.ort || ''), platz: k.platz || '', codes: [k.code].concat(k.blanko || []).filter(Boolean),
+    entsorgt: k.entsorgt ? { wer: k.entsorgt.wer, am: k.entsorgt.am } : null, nichtGefunden: k.nichtGefunden ? { wer: k.nichtGefunden.wer, am: k.nichtGefunden.am } : null };
+}
+/** Prüfung eines Platzes für _LagerKit\Inventuren\ (eine Zeile je Platz und Durchgang) */
+function inventurPruefung(platz, ergebnis, meta) {
+  const m = meta || {}, l = x => (x || []).map(inventurProbe);
+  return { id: m.id || neueId(), lauf: m.lauf || '', platz: platz.id, platzName: platz.name || '', platzCode: platz.code || '', wer: m.wer || '', start: m.start || '', fertig: m.fertig || '',
+    geaendert: m.fertig || m.start || '', da: l(ergebnis.da), fehlt: l(ergebnis.fehlt), woanders: l(ergebnis.woanders), entsorgt: l(ergebnis.entsorgt),
+    unbekannt: (ergebnis.unbekannt || []).map(u => ({ code: u.code, frei: !!u.frei })), korrekturen: [] };
+}
+/** Letzte Prüfung je Platz aus den Inventur-Dateien → { platzId: Tag } */
+function letzteInventur(dateien) {
+  const aus = {};
+  for (const d of dateien || []) for (const p of (d && d.pruefungen) || []) {
+    const t = berlinTag((p && p.fertig) || ''); if (t && (!aus[p.platz] || t > aus[p.platz])) aus[p.platz] = t;
+  }
+  return aus;
+}
+/** Plätze mit fälliger Inventur: benutzt (mind. eine Probe im Lager) und die letzte Prüfung liegt mehr als n Monate zurück – oder es gab
+    noch keine und die erste Probe liegt seit n Monaten dort (proben: Übersicht-Einträge mit platz, seit, status). → [platzId] */
+function inventurFaellig(plaetze, proben, letzte, heute, monate) {
+  const n = monate > 0 ? monate : INVENTUR_MONATE, t = heute || heuteTag(), aus = [];
+  for (const pl of plaetze || []) {
+    if (!pl || pl.weg) continue;
+    const hier = (proben || []).filter(k => k && k.platz === pl.id && !istEntsorgt(k));
+    if (!hier.length) continue;
+    let ab = letzte && letzte[pl.id];
+    if (!gueltig(ab)) { ab = hier.map(k => k.seit).filter(gueltig).sort()[0]; if (!ab) continue; }
+    if (plusMonate(ab, n) < t) aus.push(pl.id);
+  }
+  return aus;
+}
+
+/* ---------- Blanko-Etiketten (Plan F3, F4) ----------
+   Nummern LKB0001 … werden nie gezählt, sondern als Bereich in _LagerKit\Einstellungen.json reserviert (blankoBereiche: { id, von, bis,
+   wer, am }). Ein reservierter Bereich kommt nie wieder – auch nicht nach abgebrochenem Druck. Überschneiden sich zwei Reservierungen
+   (zwei PCs gleichzeitig), weichen beide auf einen neuen Bereich aus: Gedruckt wird nur ein Bereich, der beim Prüfen allein stand.
+   Vergeben (zugeordnet) wird jeder Code genau einmal: blankoZuordnung { id: Code, ordner, u, probe, wer, am }. */
+const BLANKO_MAX = 120;
+const blankoFrei = (bereiche, mindest) => Math.max(mindest || 1, (bereiche || []).reduce((m, b) => Math.max(m, Number(b && b.bis) || 0), 0) + 1);
+const blankoUeberschneidung = (bereiche, eigen) => (bereiche || []).filter(b => b && b.id !== eigen.id && !b.verworfen && b.von <= eigen.bis && b.bis >= eigen.von);
+/** Code → { reserviert: Bereich|null, zuordnung: Eintrag|null } nach Einstellungen */
+function blankoStand(einst, code) {
+  const c = codeLesen(code); if (!c || c.art !== 'B') return { reserviert: null, zuordnung: null };
+  return { reserviert: ((einst && einst.blankoBereiche) || []).find(b => b && b.von <= c.nr && b.bis >= c.nr) || null,
+    zuordnung: ((einst && einst.blankoZuordnung) || []).find(z => z && z.id === c.code) || null };
+}
+/** Bereich reservieren und prüfen (io wie sicherSchreiben, auf Einstellungen.json). opt = { n, wer, mindest, warten, jetzt } → { bereich, versuche } */
+async function blankoReservieren(io, opt) {
+  const n = Math.max(1, Math.min(BLANKO_MAX, Math.floor(Number(opt.n) || 0))), warten = opt.warten == null ? 1500 : opt.warten, uhr = opt.jetzt || (() => new Date().toISOString());
+  let mindest = opt.mindest || 1, alt = null;
+  for (let v = 0; v < (opt.versuche || 6); v++) {
+    const d0 = dateiLesen('einst', await io.lesen());
+    if (d0 && d0.kaputt) throw Object.assign(new Error('Die Einstellungen sind nicht lesbar oder neuer – LagerKit überschreibt sie nicht.'), { kaputt: true });
+    const am = uhr(), von = blankoFrei(d0 && d0.blankoBereiche, mindest);
+    const b = { id: neueId(), von, bis: von + n - 1, wer: opt.wer || '', am, geaendert: am };
+    let d;
+    try { d = await sicherSchreiben(io, 'einst', { eintraege: [], bereiche: alt ? [alt, b] : [b] }, { warten, zwischen: opt.zwischen }); }
+    catch (e) { if (e.kaputt) throw e; d = null; }   // ließ sich nicht sicher schreiben: dieser Bereich gilt als verworfen, nächster Versuch
+    let frei = !!d && !blankoUeberschneidung(d.blankoBereiche, b).length;
+    if (frei) {   // zweite Prüfung etwas später: steht der Bereich noch allein da?
+      await io.warten(warten);
+      d = dateiLesen('einst', await io.lesen());
+      frei = !!(d && !d.kaputt && (d.blankoBereiche || []).some(x => x.id === b.id && !x.verworfen) && !blankoUeberschneidung(d.blankoBereiche, b).length);
+    }
+    if (frei) return { bereich: b, versuche: v + 1 };
+    mindest = Math.max(b.bis + 1, blankoFrei(d && !d.kaputt ? d.blankoBereiche : [], 1));
+    const am2 = uhr(); alt = Object.assign({}, b, { verworfen: am2, geaendert: am2 });
+    await io.warten(Math.round(Math.random() * warten));   // zufällig kurz warten, damit zwei PCs nicht wieder gleichzeitig greifen
+  }
+  throw new Error('Es ließ sich kein freier Nummernbereich sicher reservieren – vermutlich drucken gerade mehrere PCs. Bitte gleich noch einmal.');
+}
+/** Blanko-Code einer Probe zuordnen – genau einmal. z = { code, ordner, u, probe, wer, am } → { ok } | { schon: Eintrag } */
+async function blankoZuordnen(io, z, opt) {
+  opt = opt || {};
+  const e = Object.assign({}, z, { id: z.code, geaendert: z.am }), warten = opt.warten == null ? 1500 : opt.warten;
+  const fremd = d => ((d && !d.kaputt && d.blankoZuordnung) || []).find(x => x && x.id === z.code && x.probe !== z.probe) || null;
+  try {
+    await sicherSchreiben(io, 'einst', { eintraege: [], zuordnung: [e] }, { warten, zwischen: opt.zwischen, vorSchreiben: d => { const s = fremd(d); if (s) throw Object.assign(new Error('schon vergeben'), { schon: s }); } });
+  } catch (x) { if (!x.schon) throw x; await io.warten(warten); return { schon: fremd(dateiLesen('einst', await io.lesen())) || x.schon }; }   // der Stand, der sich gesetzt hat
+  await io.warten(warten);
+  const d = dateiLesen('einst', await io.lesen()), s = fremd(d);
+  if (s) { await io.warten(warten); return { schon: fremd(dateiLesen('einst', await io.lesen())) || s }; }
+  if (!(d && !d.kaputt && (d.blankoZuordnung || []).some(x => x.id === z.code))) throw new Error('Die Zuordnung ließ sich nicht sicher speichern – bitte noch einmal scannen.');
+  return { ok: true };
+}
+
+/* ---------- Entsorgungsliste: „wohin“ und fester Beleg (Plan F5, F6) ---------- */
+const wohinVorschlag = k => (k && k.asbest ? 'Asbestabfall' : '');
+const wohinText = (w, frei) => w === 'Sonstiges' ? (text(frei, 120).trim() ? 'Sonstiges: ' + text(frei, 120).trim() : 'Sonstiges') : (WOHIN.includes(w) ? w : '');
+/** Kürzel für Dateinamen: nur Buchstaben und Ziffern („Dr. Ka“ → „DrKa“) */
+const kuerzelDatei = s => String(s || '').normalize('NFC').replace(/[^\p{L}\p{N}]/gu, '') || 'ohne';
+const BELEG_RE = /^(\d{4}-\d{2}-\d{2})_([\p{L}\p{N}]+)_(\d+)\.json$/u;
+const inventurName = (tag, wer) => tag + '_' + kuerzelDatei(wer) + '.json';
+/** Fester Beleg: nimmt die nächste freie laufende Nummer und überschreibt nie eine vorhandene Datei.
+    io = { namen() → [Dateiname], lesen(name) → Text|null, schreiben(name, text), warten(ms) } → Dateiname */
+async function belegSchreiben(io, beleg, opt) {
+  opt = opt || {};
+  const k = kuerzelDatei(beleg.wer), text2 = JSON.stringify(beleg, null, 1) + '\n';
+  for (let v = 0; v < (opt.versuche || 6); v++) {
+    let lfd = (await io.namen()).map(n => BELEG_RE.exec(n)).filter(m => m && m[1] === beleg.tag && m[2] === k).reduce((m, x) => Math.max(m, +x[3]), 0) + 1, name;
+    for (;; lfd++) { name = beleg.tag + '_' + k + '_' + lfd + '.json'; if (await io.lesen(name) == null) break; }
+    await io.schreiben(name, text2);
+    await io.warten(opt.warten == null ? 1500 : opt.warten);
+    let zurueck = null; try { zurueck = JSON.parse(await io.lesen(name)); } catch (e) { zurueck = null; }
+    if (zurueck && zurueck.id === beleg.id) return name;
+    // ein anderer PC hat im selben Augenblick dieselbe Nummer genommen: seine Datei bleibt, dieser Beleg bekommt die nächste
+  }
+  throw new Error('Der Beleg ließ sich nicht sicher ablegen.');
+}
+
 const api = { VERSION, FORMAT, ARTEN, BEHAELTER, STANDARD_MONATE, BALD_TAGE, gueltig, monatsende, fristAb, plusTage, de, ausDe, berlinTag, heuteTag,
   PROJ_RE, maNorm, leseProjektordner, mitarbeiterLesen, projektNr, vorSpektron, rCode, uCode, pCode, codeLesen, sucheLesen, qrMatrix, qrSvg,
   neueId, text, warumOk, letzter, sperre, entsorgt, nichtGefunden, handFrist, frist, zustand, fristText, uebergabeTag, bueroAufgabeLesen, altUebergabeLesen,
   asbestGefunden, asbestProben, laborproben, quelleKey, istFest, da, festeDa, naechsteNr, ganzLeer, renummerieren, loeschen, nummernFestlegen, nummernPruefen,
   eintragMergen, listeMergen, enthaelt, geaenderteFelder, aufPlatteLegen, dateiLesen, leer, mergen, enthaeltAlles, sicherSchreiben, indexEintrag, kurzProbe, kurzStatus,
-  naechsterPlatzNr, platzNummernPruefen, platzSort, LISTEN };
+  naechsterPlatzNr, platzNummernPruefen, platzSort, LISTEN,
+  INVENTUR_MONATE, WOHIN, BLANKO_MAX, plusMonate, bCode, blankoCodes, seitTag, inventurAbgleich, inventurProbe, inventurPruefung, letzteInventur, inventurFaellig,
+  blankoFrei, blankoUeberschneidung, blankoStand, blankoReservieren, blankoZuordnen, wohinVorschlag, wohinText, kuerzelDatei, BELEG_RE, inventurName, belegSchreiben };
 root.LagerKern = api;
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -3079,9 +3259,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api;
 </script>
 <script id="lagerkit-app">
 /* ===== LagerKit – App (Browser) ===== */
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.2.0';
 globalThis.LAGERKIT_VERSION = APP_VERSION;
 const AENDERUNGEN = [
+  ['0.2.0', '21.11.2026', 'Inventur: Regal Platz für Platz prüfen (Platz scannen, Proben scannen, „Platz fertig“) – beim Prüfen bucht ein Scan nie um; danach jede Korrektur mit einem Klick und Namen; gespeichert und druckbar; „zuletzt geprüft“ je Platz und eine ruhige Erinnerung nach drei Monaten. Blanko-Etiketten mit eigenen Nummern (LKB0001 …), vor dem Druck sicher für alle PCs reserviert; ein freies Blanko-Etikett scannen legt eine neue Rückstellprobe an, die über beide Codes gefunden wird. Einsammeln mit „wohin“ (Restmüll, Gefährlicher Abfall, Asbestabfall, zurück an Auftraggeber, Sonstiges); jedes „Eintragen“ legt die Entsorgungsliste als festen Beleg ab, unter „Entsorgt“ anzusehen und zu drucken.'],
   ['0.1.0', '21.11.2026', 'Erste Fassung: Rückstellproben je Projekt erfassen (auch aus den LabelKit-Proben), Etikett mit QR-Code auf dem LabelKit-Bogen, Frist ab Übergabe des Berichts (sonst vorläufig ab Probenahme), Lager-Übersicht mit Regalplätzen, Fällige einsammeln mit Entsorgungsliste, Verlängern und Sperren mit Name und Grund, Herkunft unklar und Aufräumtag, Scannen mit USB-Handscanner (Proben und Regalplätze).'],
 ];
 const K = globalThis.LagerKern;
@@ -3127,6 +3308,11 @@ const S = {
   platz: null,           // Regalplatz-Ansicht { id, einraeumen, rueck: [] }
   ordner: null,          // Projektordner im Archiv (Namen)
   meldungen: [],
+  inv: null,             // laufende Inventur { lauf, start, wer, aktiv: { platz, start, scans }, fertig: [Prüfungen], stand: { id → { datei, fehler } } }
+  inventuren: [],        // _LagerKit\Inventuren\*.json [{ name, inhalt }]
+  letzteInv: {},         // Platz → Tag der letzten Prüfung
+  belege: [],            // _LagerKit\Entsorgungslisten\*.json [{ name, inhalt }]
+  belegOffen: null,      // Beleg, der sich nicht ablegen ließ (noch einmal)
 };
 
 /* ---------- Dateien ---------- */
@@ -3148,6 +3334,42 @@ function ioLagerKit(name) {
   if (!Object.values(DATEI).includes(name)) throw new Error('LagerKit schreibt in _LagerKit nur seine eigenen Dateien');
   const lk = S.lk;
   return { lesen: () => leseText(lk, name), schreiben: t => { if (!S.schreiben) throw new Error('LagerKit darf nicht in _LagerKit schreiben'); return schreibeText(lk, name, t); }, warten: ms => warten(ms) };
+}
+/* Ab 0.2.0 zwei Unterordner in _LagerKit: Inventuren (je Tag und Kürzel eine Datei) und Entsorgungslisten (feste Belege, nie geändert) */
+const UNTER = { inventuren: 'Inventuren', belege: 'Entsorgungslisten' };
+const UNTER_RE = { inventuren: /^\d{4}-\d{2}-\d{2}_[\p{L}\p{N}]+\.json$/u, belege: K.BELEG_RE };
+function ioUnter(art, name) {
+  if (!UNTER[art] || !UNTER_RE[art].test(name)) throw new Error('LagerKit schreibt in _LagerKit nur seine eigenen Dateien');
+  const dir = anlegen => unterDir(S.lk, UNTER[art], anlegen);
+  return { lesen: async () => leseText(await dir(false), name), warten: ms => warten(ms),
+    schreiben: async t => { if (!S.schreiben) throw new Error('LagerKit darf nicht in _LagerKit schreiben'); return schreibeText(await dir(true), name, t); } };
+}
+function ioBelege() {
+  const dir = anlegen => unterDir(S.lk, UNTER.belege, anlegen);
+  return { namen: async () => { const d = await dir(false), n = []; if (d) for await (const h of d.values()) if (h.kind === 'file') n.push(h.name); return n; },
+    lesen: async name => leseText(await dir(false), name), schreiben: (name, t) => ioUnter('belege', name).schreiben(t), warten: ms => warten(ms) };
+}
+/** Alle lesbaren Dateien eines Unterordners → [{ name, inhalt }] (unlesbare werden übersprungen und gemeldet) */
+async function archivDateien(art) {
+  const d = await unterDir(S.lk, UNTER[art], false).catch(() => null), aus = [], kaputt = [];
+  if (!d) return { aus, kaputt };
+  for await (const h of d.values()) {
+    if (h.kind !== 'file' || !UNTER_RE[art].test(h.name)) continue;
+    const j = K.dateiLesen(art === 'belege' ? 'beleg' : 'inventur', await leseText(d, h.name).catch(() => null));
+    if (j && !j.kaputt) aus.push({ name: h.name, inhalt: j }); else kaputt.push(h.name);
+  }
+  return { aus, kaputt };
+}
+/** Inventuren und Entsorgungslisten lesen (für „zuletzt geprüft“, die Erinnerung und „Entsorgt“) */
+function nebenLaden() {
+  return nacheinander('neben', async () => {
+    try { const r = await archivDateien('inventuren'); S.inventuren = r.aus; meldung('warn', r.kaputt.length ? 'Nicht lesbar in <code>_LagerKit\\Inventuren</code>: ' + r.kaputt.map(esc).join(', ') : '', 'inv-lesen'); }
+    catch (e) { meldung('warn', 'Die Inventuren ließen sich nicht lesen (' + esc(e.message || e.name) + ').', 'inv-lesen'); }
+    try { const r = await archivDateien('belege'); S.belege = r.aus; meldung('warn', r.kaputt.length ? 'Nicht lesbar in <code>_LagerKit\\Entsorgungslisten</code>: ' + r.kaputt.map(esc).join(', ') : '', 'beleg-lesen'); }
+    catch (e) { meldung('warn', 'Die Entsorgungslisten ließen sich nicht lesen (' + esc(e.message || e.name) + ').', 'beleg-lesen'); }
+    S.letzteInv = K.letzteInventur(S.inventuren.map(x => x.inhalt));
+    if (['uebersicht', 'inventur', 'plaetze', 'platz'].includes(S.ansicht)) neuZeichnen();
+  });
 }
 const lagerName = nr => nr + '_Lager.json';
 /** <Projekt>/_Spektron/LagerKit – lesen ohne Anlegen; mit anlegen: bei Spektron-Projekten über spektron-ordner.js („_Spektron“ mit
@@ -3309,6 +3531,7 @@ async function laden() {
   const ix = await gemeinsamLaden('index');
   S.index = ix;
   await route();
+  nebenLaden();
   if (!S.indexFehler && !(ix.projekte || []).length && !ix.gebaut) neuEinlesen(true);   // erster Start: einmal alles lesen
   else if (!S.indexFehler) neuEinlesen(false);                                     // sonst die bekannten Projekte im Hintergrund nachlesen
 }
@@ -3467,6 +3690,7 @@ async function route() {
   if (ansicht === 'einsammeln') return einsammelnOeffnen();
   if (ansicht === 'platz') return platzOeffnen(h.get('id'));
   if (ansicht === 'aufraeumen') return aufraeumenOeffnen();
+  if (ansicht === 'inventur') return inventurOeffnen(h.get('platz') || '');
   if (ansicht === 'plaetze') return zeige('plaetze');
   if (ansicht === 'anleitung') return zeige('anleitung');
   if (ansicht === 'ueber') return zeige('ueber');
@@ -3483,7 +3707,7 @@ function neuZeichnen() {
   if (a === 'zugang' || a === 'start') return;
   $('zurUebersicht').hidden = a === 'uebersicht';
   $('untertitel').innerHTML = a === 'projekt' && S.p ? `<strong>${esc(S.p.name)}</strong>${S.p.info.pj.ortstermin && K.gueltig(S.p.info.pj.ortstermin) ? ' · Ortstermin ' + de(S.p.info.pj.ortstermin) : ''}`
-    : { uebersicht: 'Rückstellproben im Büro · alle Projekte', einsammeln: 'Fällige einsammeln', platz: 'Regalplatz', aufraeumen: 'Aufräumtag: Altbestand erfassen', plaetze: 'Regalplätze', anleitung: 'Kurzanleitung', ueber: 'Über LagerKit' }[a] || '';
+    : { uebersicht: 'Rückstellproben im Büro · alle Projekte', einsammeln: 'Fällige einsammeln', platz: 'Regalplatz', aufraeumen: 'Aufräumtag: Altbestand erfassen', inventur: 'Inventur', plaetze: 'Regalplätze', anleitung: 'Kurzanleitung', ueber: 'Über LagerKit' }[a] || '';
   const m = $('main'), f = document.activeElement, fokus = f && m.contains(f) ? (f.id ? '#' + CSS.escape(f.id) : f.dataset && f.dataset.feld ? `[data-feld="${f.dataset.feld}"][data-id="${CSS.escape(f.dataset.id || '')}"]` : f.dataset && f.dataset.af ? `tr[data-aufr="${CSS.escape(f.closest('tr').dataset.aufr)}"] [data-af="${f.dataset.af}"]` : '') : '';
   const sel = fokus && f.setSelectionRange && /text|search/.test(f.type) ? [f.selectionStart, f.selectionEnd] : null;
   if (a === 'uebersicht') m.innerHTML = uebersichtHtml();
@@ -3491,6 +3715,7 @@ function neuZeichnen() {
   else if (a === 'einsammeln') m.innerHTML = einsammelnHtml();
   else if (a === 'platz') m.innerHTML = platzHtml();
   else if (a === 'aufraeumen') m.innerHTML = aufraeumenHtml();
+  else if (a === 'inventur') m.innerHTML = inventurHtml();
   else if (a === 'plaetze') m.innerHTML = plaetzeHtml();
   else if (a === 'anleitung') m.innerHTML = anleitungHtml();
   else if (a === 'ueber') m.innerHTML = ueberHtml();
@@ -3509,6 +3734,8 @@ function mehrHtml() {
   return `<details class="mehr unten" id="mehr"><summary aria-label="Mehr">Mehr …</summary><div class="mehr-pop" role="menu">
     <button type="button" role="menuitem" data-aktion="ansicht" data-wert="plaetze">Regalplätze …</button>
     <button type="button" role="menuitem" data-aktion="ansicht" data-wert="aufraeumen">Aufräumtag: Altbestand erfassen …</button>
+    <button type="button" role="menuitem" data-aktion="ansicht" data-wert="inventur">Inventur …</button>
+    <button type="button" role="menuitem" data-aktion="blanko-drucken">Blanko-Etiketten drucken …</button>
     <button type="button" role="menuitem" data-aktion="frist-einst">Standardfrist (${fristMonate()} Monate) …</button>
     <button type="button" role="menuitem" data-aktion="neu-einlesen">Index neu aufbauen (alle Projekte lesen)</button>
     <hr><button type="button" role="menuitem" data-aktion="ansicht" data-wert="anleitung">Kurzanleitung</button>
@@ -3530,6 +3757,7 @@ function fussZeichnen() {
   } else if (a === 'projekt') { mitte = projektFussHtml(); rechts = projektHauptHtml(); }
   else if (a === 'einsammeln') { mitte = einsammelnFussHtml(); rechts = `<button type="button" class="sp-knopf" data-aktion="sammel-abbrechen">Abbrechen</button><button type="button" class="sp-haupt" data-aktion="eintragen"${S.sammel && S.sammel.marks.size ? '' : ' disabled'}>Eintragen →</button>`; }
   else if (a === 'aufraeumen') { rechts = `<button type="button" class="sp-haupt" data-aktion="aufr-speichern">Speichern und Etiketten drucken →</button>`; }
+  else if (a === 'inventur') { mitte = inventurFussHtml(); rechts = inventurRechtsHtml(); }
   $('fussIn').innerHTML = mehrHtml() + mitte + '<span class="platzhalter"></span>' + rechts;
 }
 
@@ -3540,7 +3768,7 @@ function passt(k) {
   if (f.art && k.art !== f.art) return false;
   if (f.kuerzel && !(k.projekt && K.maNorm(k.projekt.kuerzel) === K.maNorm(f.kuerzel)) && K.maNorm(k.von) !== K.maNorm(f.kuerzel)) return false;
   if (!q) return true;
-  const hay = [k.titel, k.code, k.was, k.ort, k.attribute, k.rest, k.gefunden, k.projekt ? k.projekt.ordner : 'herkunft unklar', platzName(k.platz)].join(' ').toLowerCase();
+  const hay = [k.titel, k.code, ...(k.blanko || []), k.was, k.ort, k.attribute, k.rest, k.gefunden, k.projekt ? k.projekt.ordner : 'herkunft unklar', platzName(k.platz)].join(' ').toLowerCase();
   return q.split(/\s+/).every(w => hay.includes(w));
 }
 const zeileSort = (a, b) => String(a.bis).localeCompare(String(b.bis)) || platzName(a.platz).localeCompare(platzName(b.platz), 'de', { numeric: true }) || String(a.projekt ? a.projekt.nr : 'zz').localeCompare(String(b.projekt ? b.projekt.nr : 'zz')) || a.nr - b.nr;
@@ -3549,7 +3777,7 @@ function zeilenHtml(liste, mitBis, mitPlatz) {
     <td class="nr">${esc(k.titel)}</td><td>${esc(projektTitel(k.projekt))}</td>
     <td class="fett">${esc(k.was)}${k.rest ? `<div class="leise" style="font-weight:400;font-size:12.5px">Rest von ${esc(k.rest)}</div>` : ''}</td>
     <td>${esc(k.u ? 'gefunden: ' + k.gefunden : k.ort)}</td><td class="leise">${genommenText(k)}</td>
-    ${mitBis ? `<td>${k.status === 'entsorgt' ? 'entsorgt ' + datumZeit(k.entsorgt.am) + ' · ' + esc(k.entsorgt.wer) : de(k.bis)}</td>` : ''}
+    ${mitBis ? `<td>${k.status === 'entsorgt' ? 'entsorgt ' + datumZeit(k.entsorgt.am) + ' · ' + esc(k.entsorgt.wer) + (k.entsorgt.wohin ? '<div class="leise" style="font-size:12.5px">→ ' + esc(k.entsorgt.wohin) + '</div>' : '') : de(k.bis)}</td>` : ''}
     ${mitPlatz ? `<td class="fett" style="white-space:nowrap">${esc(platzName(k.platz))}</td>` : ''}<td>${hinweiseHtml(k)}</td></tr>`).join('');
 }
 const KOPF = (bis, platz) => `<thead><tr><th>Nr.</th><th>Projekt</th><th>Was</th><th>Raum/Ort</th><th>Genommen</th>${bis ? `<th>${bis}</th>` : ''}${platz ? '<th>Platz</th>' : ''}<th>Hinweis</th></tr></thead>`;
@@ -3560,17 +3788,20 @@ function uebersichtHtml() {
   const unklar = K.da((S.ohne && S.ohne.proben) || []).filter(u => !u.storniert);
   const fAlle = lager.filter(k => k.status === 'faellig'), bAlle = lager.filter(k => k.status === 'bald');
   const ps = plaetze();
+  const invFaellig = new Set(K.inventurFaellig(ps, lager, S.letzteInv || {}, t));
   const kacheln = ps.filter(p => !p.nichtMehr || lager.some(k => k.platz === p.id)).map(p => {
     const hier = lager.filter(k => k.platz === p.id), f = hier.filter(k => k.status === 'faellig').length, b = hier.filter(k => k.status === 'bald').length;
-    const cls = f ? 'rot' : b ? 'gelb' : '';
+    const cls = f ? 'rot' : b ? 'gelb' : '', g = (S.letzteInv || {})[p.id];
     return `<button type="button" class="kachel ${cls}" data-aktion="platz-filter" data-id="${esc(p.id)}" aria-pressed="${S.filter.platz === p.id}" title="Klick: nur diesen Platz zeigen">
-      <b>${esc(p.name)}</b><small>${hier.length} Probe${hier.length === 1 ? '' : 'n'}${f ? ' · ' + f + ' fällig' : b ? ' · ' + b + ' bald' : ''}</small></button>`;
+      <b>${esc(p.name)}</b><small>${hier.length} Probe${hier.length === 1 ? '' : 'n'}${f ? ' · ' + f + ' fällig' : b ? ' · ' + b + ' bald' : ''}</small>
+      <span class="gepr${invFaellig.has(p.id) ? ' faellig' : ''}">${g ? 'zuletzt geprüft ' + monatJahr(g) : hier.length ? 'noch nie geprüft' : ''}${invFaellig.has(p.id) ? ' · Inventur fällig' : ''}</span></button>`;
   }).join('');
   const kuerzel = [...new Set(personen().map(p => p.kuerzel))];
   const nPlaetze = new Set(imLager.map(k => k.platz)).size;
   const gruppe = k => platzVon(k.platz) ? k.platz : '';
   const gruppen = ps.concat([{ id: '', name: 'ohne Regalplatz' }]).map(p => ({ p, l: imLager.filter(k => gruppe(k) === p.id).sort(zeileSort) })).filter(g => g.l.length);
   return `<div id="meldungen" class="meldungen">${meldungenHtml()}</div>
+  ${inventurErinnerungHtml(invFaellig)}
   ${ps.length ? '' : `<div class="meldung gelb"><span>Es gibt noch keine Regalplätze. Ohne Regalplatz gibt es kein Etikett – lege sie einmal unter „Mehr … › Regalplätze“ an (z. B. „Regal A · Fach 1“, „Boden links“).</span><button type="button" class="sp-knopf" data-aktion="ansicht" data-wert="plaetze">Regalplätze anlegen …</button></div>`}
   <div class="kopfzeile"><div><h1>Rückstellproben im Büro</h1>
     <div class="zahlen">${lager.length} im Lager · <b class="rot">${fAlle.length} fällig</b> · ${bAlle.length} werden in den nächsten 30 Tagen fällig · ${unklar.filter(u => !u.zugeordnet && !K.entsorgt(u)).length} Herkunft unklar</div></div>
@@ -3593,7 +3824,8 @@ function uebersichtHtml() {
   <details class="klapp"${S.filter.platz || S.filter.q ? ' open' : ''}><summary>Im Lager · ${imLager.length} Probe${imLager.length === 1 ? '' : 'n'} auf ${nPlaetze} ${nPlaetze === 1 ? 'Regalplatz' : 'Regalplätzen'}</summary>
     <div class="tab-wrap"><table class="liste" style="min-width:980px">${KOPF('Aufbewahren bis', false)}<tbody>${gruppen.map(g => `<tr class="gruppe-kopf"><td colspan="7">${esc(g.p.name)} · ${g.l.length}${g.p.id ? ` <button type="button" class="linkknopf" data-aktion="platz-oeffnen" data-id="${esc(g.p.id)}">Platz öffnen</button>` : ''}</td></tr>${zeilenHtml(g.l, true, false)}`).join('')}</tbody></table></div></details>
   <details class="klapp"><summary>Herkunft unklar · ${unklar.filter(u => !u.zugeordnet && !K.entsorgt(u)).length} <span>– im Regal gefunden, noch keinem Projekt zugeordnet</span></summary>${unklarHtml(unklar)}</details>
-  <details class="klapp"><summary>Entsorgt · ${weg.length} <span>– bleiben sichtbar, mit Name und Datum</span></summary>
+  <details class="klapp"${S.belegeOffen ? ' open' : ''}><summary>Entsorgt · ${weg.length} <span>– bleiben sichtbar, mit Name und Datum</span></summary>
+    ${belegeHtml()}
     ${weg.length ? `<div class="tab-wrap"><table class="liste" style="min-width:980px">${KOPF('Entsorgt', true)}<tbody>${zeilenHtml(weg, true, true)}</tbody></table></div>` : '<p class="leise" style="padding:0 18px 12px">Noch nichts entsorgt.</p>'}</details>`;
 }
 function unklarHtml(unklar) {
@@ -3628,19 +3860,29 @@ async function klick(e) {
     case 'u-drucken': { const u = uProbe(d.id); if (u) druckDialog([{ u: true, p: u }]); return; }
     case 'u-verlaengern': fristDialog({ u: true, id: d.id }, 'verlaengern'); return;
     case 'u-zurueck': entsorgtZurueckDialog({ u: true, id: d.id }); return;
+    case 'inventur-start': geheZu('ansicht=inventur'); return;
+    case 'inventur-spaeter': lokal.set('lagerkit-inventur-spaeter', K.plusTage(heute(), 14)); toast('Die Erinnerung ist an diesem PC für zwei Wochen ausgeblendet.'); neuZeichnen(); return;
+    case 'blanko-drucken': blankoDruckDialog(); return;
+    case 'beleg-zeigen': belegZeigen(d.name); return;
+    case 'belege-alle': S.belegeAlle = !S.belegeAlle; S.belegeOffen = true; neuZeichnen(); return;
+    case 'beleg-nochmal': if (S.belegOffen) belegAblegen(S.belegOffen).then(n => { if (n) toast('Beleg abgelegt: ' + esc(n), 'gut'); neuZeichnen(); }); return;
+    case 'blanko-frei': blankoFreiDialog(d.code, d.platz || ''); return;
   }
   if (S.ansicht === 'projekt') return projektAktion(a, d, b);
   if (S.ansicht === 'einsammeln') return sammelAktion(a, d, b);
   if (S.ansicht === 'platz') return platzAktion(a, d, b);
   if (S.ansicht === 'aufraeumen') return aufrAktion(a, d, b);
+  if (S.ansicht === 'inventur') return inventurAktion(a, d, b);
   if (S.ansicht === 'plaetze') return plaetzeAktion(a, d, b);
 }
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'suche') { S.filter.q = t.value; neuZeichnen(); }
+  if (S.ansicht === 'einsammeln' && S.sammel && t.dataset && t.dataset.wohinFrei != null) { const alt = S.sammel.wohin.get(t.dataset.wohinFrei) || { w: 'Sonstiges' }; S.sammel.wohin.set(t.dataset.wohinFrei, { w: alt.w, frei: K.text(t.value, 120) }); }
 });
 document.addEventListener('change', e => {
   const t = e.target;
+  if (S.ansicht === 'einsammeln' && S.sammel && t.dataset && t.dataset.wohin != null) { const alt = S.sammel.wohin.get(t.dataset.wohin) || {}; S.sammel.wohin.set(t.dataset.wohin, { w: t.value, frei: alt.frei || '' }); neuZeichnen(); return; }
   if (t.id === 'fKuerzel') { S.filter.kuerzel = t.value; neuZeichnen(); }
   if (t.id === 'fArt') { S.filter.art = t.value; neuZeichnen(); }
 });
@@ -3832,13 +4074,15 @@ function detailHtml(p, ctx, ro) {
     ...(p.fristen || []).map(f => [f.am, `Aufbewahren bis ${de(f.bis)} ${f.art === 'verlaengert' ? 'verlängert' : 'von Hand gesetzt'} – ${esc(f.warum)} (${esc(nameVon(f.wer))})`]),
     ...(p.sperren || []).flatMap(s => [[s.am, `Gesperrt „nicht entsorgen“ – ${esc(s.warum)} (${esc(nameVon(s.wer))})`]].concat(s.aufgehoben ? [[s.aufgehoben.am, `Sperre aufgehoben – ${esc(s.aufgehoben.warum)} (${esc(nameVon(s.aufgehoben.wer))})`]] : [])),
     ...(p.plaetze || []).map(x => [x.am, `Platz: ${esc(platzName(x.von) || '–')} → ${esc(platzName(x.nach))}${x.warum ? ' – ' + esc(x.warum) : ''} (${esc(nameVon(x.wer))})`]),
-    ...(p.ereignisse || []).map(x => [x.am, ({ entsorgt: 'entsorgt', nichtGefunden: 'beim Einsammeln nicht gefunden', entsorgtZurueck: 'doch nicht entsorgt – ' + esc(x.warum || ''), gefunden: 'wieder gefunden' }[x.art] || esc(x.art)) + ` (${esc(nameVon(x.wer))})`]),
+    ...(p.ereignisse || []).map(x => [x.am, ({ entsorgt: 'entsorgt' + (x.wohin ? ' → ' + esc(x.wohin) : ''), nichtGefunden: x.bei === 'inventur' ? 'bei der Inventur nicht gefunden' : 'beim Einsammeln nicht gefunden', entsorgtZurueck: 'doch nicht entsorgt – ' + esc(x.warum || ''), gefunden: 'wieder gefunden' + (x.warum ? ' – ' + esc(x.warum) : '') }[x.art] || esc(x.art)) + ` (${esc(nameVon(x.wer))})`]),
+    ...(p.codes || []).filter(c => c.art === 'blanko').map(c => [c.am, `Blanko-Etikett ${esc(c.code)} zugeordnet (${esc(nameVon(c.wer))})`]),
     ...(p.gedruckt || []).map(x => [x.am, `Etikett gedruckt (bis mind. ${de(x.bis)}, ${esc(platzName(x.platz))})`]),
     ...(p.storniert ? [[p.storniert.am, `storniert${p.storniert.grund ? ' – ' + esc(p.storniert.grund) : ''} (${esc(nameVon(p.storniert.wer))})`]] : []),
     ...(p.ausU ? [[p.erfasst, `aus „Herkunft unklar“ ${esc(p.ausU)} zugeordnet`]] : []),
   ].sort((a, b) => String(a[0]).localeCompare(String(b[0])));
   const f = (feld, label, breite) => `<label class="f">${label}<input type="text" data-feld="${feld}" data-id="${esc(p.id)}" value="${esc(p[feld])}" style="width:${breite}"${aus || (lk && feld === 'attribute') ? ' disabled' : ''}></label>`;
-  return `<div class="detail" id="detail"><div class="ueber">Ausgewählt: R${p.nr}${lk ? ' · Rest von ' + esc(p.quelle.titel) : ''} · <span class="mono" style="letter-spacing:0;text-transform:none">${esc(p.code || K.rCode(S.p.nr, p.nr))}</span></div>
+  return `<div class="detail" id="detail"><div class="ueber">Ausgewählt: R${p.nr}${lk ? ' · Rest von ' + esc(p.quelle.titel) : ''} · <span class="mono" style="letter-spacing:0;text-transform:none">${esc(p.code || K.rCode(S.p.nr, p.nr))}</span>${K.blankoCodes(p).length ? ` · Blanko-Etikett <span class="mono" style="letter-spacing:0;text-transform:none">${K.blankoCodes(p).map(esc).join(', ')}</span>` : ''}</div>
+    ${K.blankoCodes(p).length && !p.nrFest && !p.storniert && !K.entsorgt(p) ? '<div class="leise" style="font-size:13px">Die Probe trägt ein Blanko-Etikett – ein Scan findet sie darüber. Ein LagerKit-Etikett zum Überkleben ist freiwillig.</div>' : ''}
     ${neuDruckenNoetig(p) ? `<div class="meldung warn"><span>Seit dem Druck hat sich etwas geändert, das auf dem Etikett steht.</span><button type="button" class="sp-knopf" data-aktion="drucken-eine" data-id="${esc(p.id)}">Etikett neu drucken</button></div>` : ''}
     <div class="felder">
       ${f('attribute', 'Oberfläche / Attribute' + (lk ? ' (aus LabelKit)' : ''), '240px')}
@@ -4052,6 +4296,7 @@ function aktuelleFrist(z) {
 /** Verlängern (art verlaengern) oder Datum von Hand setzen (art hand) – Name und Grund Pflicht */
 function fristDialog(z, art) {
   const bis = aktuelleFrist(z), basis = bis && bis > heute() ? bis : heute();
+  const k0 = S.sammel && S.ansicht === 'einsammeln' ? sammelListe().find(x => x.id === z.id && (z.u ? x.u : x.projekt && x.projekt.ordner === z.ordner)) || null : null;   // „behalten“ beim Einsammeln: kommt in den Beleg
   const vorschlag = art === 'verlaengern' ? K.fristAb(basis, fristMonate()) : bis;
   dlgOeffnen(art === 'verlaengern' ? 'Verlängern – ' + esc(zielTitel(z)) : 'Aufbewahren bis ändern – ' + esc(zielTitel(z)),
     `<p class="leise">Bisher: mind. ${de(bis) || '–'}. Ein von Hand gesetztes Datum gilt vor der Regel (Bericht/Probenahme).</p>
@@ -4063,6 +4308,7 @@ function fristDialog(z, art) {
       if (!K.warumOk(warum)) return 'Bitte kurz schreiben, warum (Pflicht).';
       const r = await aendern([z], (p, am) => { p.fristen = (p.fristen || []).concat({ id: K.neueId(), bis: b, wer: w.wer, warum, am, art: art === 'verlaengern' || b > (bis || '') ? 'verlaengert' : 'hand' }); });
       if (S.sammel) sammelEntfernen(z);
+      if (k0 && !r.fehler.length && r.ok.length) S.sammel.behalten.push(Object.assign(belegZeile(k0, 'behalten', null), { eingetragen: true, verlaengertBis: b, warum }));
       nachAenderung(r, 'Aufbewahren bis ' + de(b) + ' gespeichert.', true, z);
     } });
 }
@@ -4164,7 +4410,7 @@ function uZuordnenDialog(id) {
         const proben = (lager && lager.proben) || [];
         neu = { id: K.neueId(), nr: K.naechsteNr(proben), erfasst: am, erfasstVon: wer, geaendert: am, was: u.was, ort: u.ort || ('gefunden: ' + u.gefunden), attribute: u.attribute || '', art: u.art || 'Sonstige',
           behaelter: u.behaelter || '', probenahme: u.probenahme || '', probenahmeUnbekannt: !u.probenahme, von: u.von || '', platz: u.platz || '', notiz: [u.notiz, 'gefunden: ' + u.gefunden].filter(Boolean).join(' · '), verdacht: !!u.verdacht,
-          quelle: null, nachtraeglich: true, ausU: 'U' + u.nr, erfasstAlsU: u.erfasst, codes: [{ code: K.uCode(u.nr), art: 'frueher', am }], fristen: u.fristen || [], sperren: u.sperren || [], plaetze: u.plaetze || [], ereignisse: [], gedruckt: [], ansLabor: [], wohin: '' };
+          quelle: null, nachtraeglich: true, ausU: 'U' + u.nr, erfasstAlsU: u.erfasst, codes: [{ code: K.uCode(u.nr), art: 'frueher', am }].concat((u.codes || []).filter(c => c && c.art === 'blanko')), fristen: u.fristen || [], sperren: u.sperren || [], plaetze: u.plaetze || [], ereignisse: [], gedruckt: [], ansLabor: [], wohin: '' };
         if (!neu.probenahme) neu.erfasst = u.erfasst;   // Frist ab dem Tag des Erfassens wie bisher
         const ld = await lagerDir(dir, true), name = lagerName(nr);
         const disk = await K.sicherSchreiben({ lesen: () => leseText(ld, name), schreiben: t => schreibeText(ld, name, t), warten }, 'projekt', { eintraege: [neu], felder: { werte: { projekt: { nr, ordner } }, am: '1970-01-01T00:00:00.000Z' } }, { warten: nachpruefMs(), vorSchreiben: d => sicherung(ld, nr, d) });
@@ -4206,6 +4452,8 @@ const ETIKETT_CSS = `
 .etk-absender{flex:none;font-size:6pt;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .etk-platzname{font-size:17pt;font-weight:700;line-height:1.1;overflow:hidden;max-height:13mm}
 .etk-mess{position:absolute;left:-10000px;top:0;visibility:hidden}
+.etk-linien{align-self:stretch;justify-content:space-between;gap:0;padding-bottom:.6mm}
+.etk-linie{flex:1;border-bottom:.3mm solid #000;display:flex;align-items:flex-start;padding-top:.6mm;font-size:8pt}
 `;
 const DRUCK_CSS = '*{box-sizing:border-box;margin:0;padding:0}body{background:#fff}' + ETIKETT_CSS + '@media print{@page{size:A4 portrait;margin:0}body{margin:0}.etk-seite{margin:0}.etk{border-color:transparent}}';
 /** Schwarzer Balken als SVG – druckt auch, wenn „Hintergrundgrafiken“ aus ist */
@@ -4251,9 +4499,10 @@ function zuLang(daten) {
   box.remove();
   return aus;
 }
-function druckFenster(titel, html, css) {
-  const win = window.open('', '_blank', 'width=900,height=760');
+function druckFenster(titel, html, css, offen) {
+  const win = offen || window.open('', '_blank', 'width=900,height=760');
   if (!win) { toast('Das Druckfenster wurde blockiert – bitte Pop-ups für LagerKit erlauben.', 'schlecht'); return false; }
+  win.document.open();
   win.document.write(`<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>${esc(titel)}</title><style>${css}</style></head><body>${html}</body></html>`);
   win.document.close();
   if (!window.LAGERKIT_TEST) setTimeout(() => { try { win.focus(); win.print(); } catch (e) { /* Fenster zu */ } }, 400);
@@ -4299,10 +4548,15 @@ function druckDialog(eintraege, alleAn) {
 
 /* ---------- Fällige einsammeln ---------- */
 async function einsammelnOeffnen() {
-  S.sammel = S.sammel || { marks: new Map() };
+  S.sammel = S.sammel || { marks: new Map(), wohin: new Map(), behalten: [] };
   zeige('einsammeln');
   // Projekte mit fälligen Proben frisch lesen (Übergabe, Sperren, neue Fristen) – der Index kann älter sein
-  const ordner = [...new Set(alleProben().filter(k => k.status === 'faellig' && k.projekt).map(k => k.projekt.ordner))], neu = [];
+  await indexFrisch([...new Set(alleProben().filter(k => k.status === 'faellig' && k.projekt).map(k => k.projekt.ordner))]);
+  if (S.ansicht === 'einsammeln') neuZeichnen();
+}
+/** Projekte frisch lesen und ihre Einträge in der Übersicht ersetzen (Index im Hintergrund nachziehen) */
+async function indexFrisch(ordner) {
+  const neu = [];
   for (const o of ordner) {
     try {
       const dir = await S.archiv.getDirectoryHandle(o), nr = K.projektNr(o).nr, { lager, stand } = await lagerLesen(dir, nr);
@@ -4313,8 +4567,14 @@ async function einsammelnOeffnen() {
   }
   neu.forEach(setzeIndexLokal);
   if (neu.length && S.schreiben) nacheinander('index', () => gemeinsamSchreiben('index', { eintraege: neu })).catch(() => {});
-  if (S.ansicht === 'einsammeln') neuZeichnen();
+  return neu;
 }
+/** „wohin“ einer Probe in der Liste: selbst gewählt, sonst vorbelegt (Asbest nachgewiesen → Asbestabfall) */
+function sammelWohin(k) {
+  const w = S.sammel && S.sammel.wohin.get(k.key);
+  return w ? w : { w: K.wohinVorschlag(k), frei: '' };
+}
+const wohinOptionen = gewaehlt => `<option value="">– wohin? (freiwillig) –</option>` + K.WOHIN.map(o => `<option${o === gewaehlt ? ' selected' : ''}>${esc(o)}</option>`).join('');
 function sammelListe() {
   const ps = plaetze(), rang = id => { const i = ps.findIndex(p => p.id === id); return i < 0 ? 9999 : i; };
   return alleProben().filter(k => k.status === 'faellig').sort((a, b) => rang(a.platz) - rang(b.platz) || String(a.projekt ? a.projekt.nr : 'zz').localeCompare(String(b.projekt ? b.projekt.nr : 'zz')) || a.nr - b.nr);
@@ -4323,10 +4583,13 @@ const zielVon = k => k.u ? { u: true, id: k.id } : { ordner: k.projekt.ordner, i
 function sammelEntfernen(z) { if (S.sammel) for (const k of [...S.sammel.marks.keys()]) if (k.endsWith('|' + z.id)) S.sammel.marks.delete(k); }
 function einsammelnHtml() {
   const l = sammelListe(), m = S.sammel.marks;
+  const nMark = m.size;
   return `<div id="meldungen" class="meldungen">${meldungenHtml()}</div>
   <div class="kopfzeile"><div><h1>Fällige Proben einsammeln · ${l.length}</h1>
     <div class="zahlen">Sortiert nach Regalplatz – geh das Regal einmal ab. Scanne jede Probe, die du rausnimmst: Sie ist dann als „entsorgt“ vorgemerkt. Der Rest geht per Klick. Erst „Eintragen“ speichert, mit deinem Namen. Nichts wird gelöscht – entsorgte Proben bleiben mit Name und Datum sichtbar.</div></div>
     <button type="button" class="sp-knopf" data-aktion="liste-drucken"${l.length ? '' : ' disabled'}>Entsorgungsliste drucken</button></div>
+  ${nMark ? `<div class="karte filter"><span class="wohin" style="font-size:14px;color:var(--sp-text)"><b>Für alle markierten (${nMark}):</b> <select id="wohinAlle" aria-label="wohin für alle markierten">${wohinOptionen('')}</select>
+    <input type="text" id="wohinAlleFrei" placeholder="bei Sonstiges: was genau?" aria-label="Sonstiges, was genau"> <button type="button" class="sp-knopf klein" data-aktion="wohin-alle">setzen</button></span></div>` : ''}
   <div class="sammel">${l.map(k => { const w = m.get(k.key) || '', ab = !!k.sperre; return `<div class="sk${w ? ' vorgemerkt' : ''}" data-key="${esc(k.key)}">
     <div class="pl"><small>${esc(platzName(k.platz))}</small><span class="nr" style="font-size:18px">${esc(k.titel)}</span></div>
     <div class="mitte"><div><b>${esc(k.was)}</b> · <span style="color:#3a4954">${esc(k.u ? 'gefunden: ' + k.gefunden : k.ort)}</span></div>
@@ -4334,7 +4597,8 @@ function einsammelnHtml() {
     ${ab ? `<div class="gesperrt-text">Gesperrt – bleibt auf ihrem Platz, bis jemand die Sperre mit Name und Grund aufhebt.</div>` : `<div class="wahl3" role="group" aria-label="${esc(k.titel)}">
       <button type="button" data-aktion="mark" data-key="${esc(k.key)}" data-wert="entsorgt" aria-pressed="${w === 'entsorgt'}">entsorgt</button>
       <button type="button" data-aktion="mark" data-key="${esc(k.key)}" data-wert="nichtGefunden" aria-pressed="${w === 'nichtGefunden'}">nicht gefunden</button>
-      <button type="button" data-aktion="behalten" data-key="${esc(k.key)}">behalten (verlängern …)</button></div>`}</div>`; }).join('') || '<div class="karte" style="padding:24px">Nichts fällig. 🎉</div>'}</div>`;
+      <button type="button" data-aktion="behalten" data-key="${esc(k.key)}">behalten (verlängern …)</button></div>
+      ${w === 'nichtGefunden' ? '' : (() => { const wv = sammelWohin(k); return `<label class="wohin">wohin<select data-wohin="${esc(k.key)}" aria-label="wohin, ${esc(k.titel)}">${wohinOptionen(wv.w)}</select>${wv.w === 'Sonstiges' ? `<input type="text" data-wohin-frei="${esc(k.key)}" value="${esc(wv.frei)}" placeholder="was genau?" aria-label="Sonstiges, was genau">` : ''}</label>`; })()}`}</div>`; }).join('') || '<div class="karte" style="padding:24px">Nichts fällig. 🎉</div>'}</div>`;
 }
 function einsammelnFussHtml() {
   const v = [...S.sammel.marks.values()], g = sammelListe().filter(k => k.sperre).length;
@@ -4346,37 +4610,55 @@ async function sammelAktion(a, d) {
   if (a === 'mark' && k) { if (k.sperre) return; const m = S.sammel.marks; if (m.get(k.key) === d.wert) m.delete(k.key); else m.set(k.key, d.wert); neuZeichnen(); return; }
   if (a === 'behalten' && k) return fristDialog(zielVon(k), 'verlaengern');
   if (a === 'liste-drucken') return entsorgungslisteDrucken();
-  if (a === 'sammel-abbrechen') { S.sammel.marks.clear(); geheZu(''); return; }
+  if (a === 'wohin-alle') {
+    const w = $('wohinAlle').value, frei = K.text($('wohinAlleFrei').value, 120);
+    for (const key of S.sammel.marks.keys()) S.sammel.wohin.set(key, { w, frei });
+    toast(w ? '„' + esc(K.wohinText(w, frei)) + '“ für ' + S.sammel.marks.size + ' markierte Proben gesetzt.' : '„wohin“ für die markierten Proben geleert.'); neuZeichnen(); return;
+  }
+  if (a === 'sammel-abbrechen') { S.sammel.marks.clear(); S.sammel.wohin.clear(); S.sammel.behalten = []; geheZu(''); return; }
   if (a === 'eintragen') return eintragen();
 }
-async function eintragen() {
+/** Eintragen läuft als ein Vorgang (zählt als „schreibt“; ein zweiter Klick wartet, statt doppelt einzutragen) */
+function eintragen() { return nacheinander('eintragen', eintragenJetzt); }
+async function eintragenJetzt() {
+  if (!S.sammel || !S.sammel.marks.size) return;
   const wer = werPflicht(); if (!wer) return;
   const l = sammelListe(), ziele = [];
-  for (const [key, wert] of S.sammel.marks) { const k = l.find(x => x.key === key); if (k && !k.sperre) ziele.push(Object.assign(zielVon(k), { wert, ctx: { monate: fristMonate(), uebergabe: k.projekt ? k.projekt.uebergabe : '' } })); }
+  // Stand der Liste in diesem Moment – genau das kommt in den festen Beleg (Plan F6)
+  const zeilen = l.map(k => belegZeile(k, S.sammel.marks.get(k.key) || (k.sperre ? 'gesperrt' : 'offen'), sammelWohin(k)));
+  for (const [key, wert] of S.sammel.marks) { const k = l.find(x => x.key === key); if (k && !k.sperre) { const wv = sammelWohin(k); ziele.push(Object.assign(zielVon(k), { key, wert, wohin: wert === 'entsorgt' ? K.wohinText(wv.w, wv.frei) : '', ctx: { monate: fristMonate(), uebergabe: k.projekt ? k.projekt.uebergabe : '' } })); } }
   if (!ziele.length) return;
-  const ueber = [];
+  const ueber = new Map();
   const r = await aendern(ziele, (p, am, z) => {
     // frisch geprüft: inzwischen gesperrt, schon entsorgt oder nicht mehr fällig → nichts eintragen
-    if (K.sperre(p)) { ueber.push((z.u ? 'U' : 'R') + p.nr + ' ist inzwischen gesperrt'); return false; }
-    if (K.entsorgt(p)) return false;
-    if (z.wert === 'entsorgt' && K.zustand(p, z.ctx).status !== 'faellig') { ueber.push((z.u ? 'U' : 'R') + p.nr + ' ist nicht mehr fällig'); return false; }
-    p.ereignisse = (p.ereignisse || []).concat({ id: K.neueId(), art: z.wert, wer, am });
+    if (K.sperre(p)) { ueber.set(z.key, 'ist inzwischen gesperrt'); return false; }
+    if (K.entsorgt(p)) { ueber.set(z.key, 'war schon als entsorgt eingetragen'); return false; }
+    if (z.wert === 'entsorgt' && K.zustand(p, z.ctx).status !== 'faellig') { ueber.set(z.key, 'ist nicht mehr fällig'); return false; }
+    p.ereignisse = (p.ereignisse || []).concat(Object.assign({ id: K.neueId(), art: z.wert, wer, am }, z.wohin ? { wohin: z.wohin } : {}));
+    if (z.wohin) p.wohin = z.wohin;
   });
-  S.sammel.marks.clear();
-  if (r.fehler.length || ueber.length) toast('Eingetragen: ' + r.ok.length + '. ' + [...ueber, ...r.fehler].map(esc).join(' · '), r.fehler.length ? 'schlecht' : '');
-  else toast(`${r.ok.length} Probe${r.ok.length === 1 ? '' : 'n'} eingetragen von ${esc(nameVon(wer))} am ${de(heute())}.`, 'gut');
+  const okKeys = new Set(r.ok.map(z => z.key));
+  for (const z of zeilen) { if (z.ergebnis !== 'entsorgt' && z.ergebnis !== 'nichtGefunden') continue; z.eingetragen = okKeys.has(z.key); if (!z.eingetragen) z.nichtEingetragen = ueber.get(z.key) || 'nicht gespeichert'; }
+  const titelVon = key => { const z = zeilen.find(x => x.key === key); return z ? (z.projekt ? z.projekt.nr + ' ' : '') + z.titel : ''; };
+  const beleg = { format: K.FORMAT.beleg, version: K.VERSION, app: { name: 'LagerKit', version: APP_VERSION }, id: K.neueId(), tag: heute(), am: jetzt(), wer, werName: nameVon(wer),
+    proben: zeilen.concat(S.sammel.behalten || []) };
+  S.sammel.marks.clear(); S.sammel.wohin.clear(); S.sammel.behalten = [];
+  const name = r.ok.length ? await belegAblegen(beleg) : null;
+  const ueberText = [...ueber].map(([key, t]) => titelVon(key) + ' ' + t);
+  if (r.fehler.length || ueberText.length) toast('Eingetragen: ' + r.ok.length + '. ' + [...ueberText, ...r.fehler].map(esc).join(' · ') + (name ? ' · Beleg abgelegt.' : ''), r.fehler.length ? 'schlecht' : '');
+  else toast(`${r.ok.length} Probe${r.ok.length === 1 ? '' : 'n'} eingetragen von ${esc(nameVon(wer))} am ${de(heute())}.${name ? ' Die Liste ist als fester Beleg abgelegt (unter „Entsorgt“).' : ''}`, name || !r.ok.length ? 'gut' : 'schlecht');
   neuZeichnen();
 }
 function entsorgungslisteDrucken() {
   const l = sammelListe();
   const zeilen = l.map(k => `<tr><td>${esc(platzName(k.platz))}</td><td class="m">${esc(k.titel)}</td><td>${esc(projektTitel(k.projekt))}</td><td><b>${esc(k.was)}</b>${k.rest ? '<br>Rest von ' + esc(k.rest) : ''}</td><td>${esc(k.u ? 'gefunden: ' + k.gefunden : k.ort)}</td><td>${genommenText(k)}</td><td>${de(k.bis)}</td>
     <td>${k.asbest ? '<b>⚠ Asbest nachgewiesen – als asbesthaltigen Abfall entsorgen</b><br>' : k.verdacht ? '<b>⚠ Asbest / schadstoffhaltig (Verdacht)</b><br>' : ''}${k.sperre ? '<b>GESPERRT – nicht entsorgen:</b> ' + esc(k.sperre.warum) + ' (' + esc(k.sperre.wer) + ')<br>' : ''}${k.quelle === 'vorlaeufig' && !k.u ? 'kein Bericht übergeben – bitte prüfen' : ''}</td>
-    <td class="k">${k.sperre ? '–' : '☐ entsorgt<br>☐ nicht gefunden<br>☐ behalten'}</td></tr>`).join('');
+    <td class="k">${k.sperre ? '–' : '☐ entsorgt<br>☐ nicht gefunden<br>☐ behalten'}</td><td>${k.sperre ? '–' : (() => { const wv = sammelWohin(k); return wv.w ? esc(K.wohinText(wv.w, wv.frei)) : '<span style="color:#666">__________</span>'; })()}</td></tr>`).join('');
   druckFenster('Entsorgungsliste ' + de(heute()), `<h1>Entsorgungsliste Rückstellproben</h1><p>Stand ${de(heute())} · ${l.length} fällige Probe${l.length === 1 ? '' : 'n'} · sortiert nach Regalplatz · eingesammelt von: ______________________ am ____________</p>
-    <table><thead><tr><th>Platz</th><th>Nr.</th><th>Projekt</th><th>Was</th><th>Raum/Ort</th><th>Genommen</th><th>bis</th><th>Hinweis</th><th>Erledigt</th></tr></thead><tbody>${zeilen}</tbody></table>
-    <p class="f">Danach in LagerKit „Fällige einsammeln“ eintragen – erst dann gilt die Probe als entsorgt. ${ABSENDER}</p>`,
-    '*{box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:10pt;color:#000;margin:12mm}h1{font-size:15pt;margin:0 0 4px}p{margin:0 0 8px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #000;padding:3px 4px;vertical-align:top;text-align:left}th{font-size:8.5pt}.m{font-family:Consolas,monospace;font-weight:700}.k{white-space:nowrap;font-size:9pt}.f{margin-top:10px;font-size:8pt}@page{size:A4 portrait;margin:0}');
+    <table><thead><tr><th>Platz</th><th>Nr.</th><th>Projekt</th><th>Was</th><th>Raum/Ort</th><th>Genommen</th><th>bis</th><th>Hinweis</th><th>Erledigt</th><th>wohin</th></tr></thead><tbody>${zeilen}</tbody></table>
+    <p class="f">Danach in LagerKit „Fällige einsammeln“ eintragen – erst dann gilt die Probe als entsorgt. ${ABSENDER}</p>`, LISTE_CSS);
 }
+const LISTE_CSS = '*{box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:10pt;color:#000;margin:12mm}h1{font-size:15pt;margin:0 0 4px}h2{font-size:12pt;margin:12px 0 4px}p{margin:0 0 8px}table{width:100%;border-collapse:collapse;margin-bottom:6px}th,td{border:1px solid #000;padding:3px 4px;vertical-align:top;text-align:left}th{font-size:8.5pt}.m{font-family:Consolas,monospace;font-weight:700}.k{white-space:nowrap;font-size:9pt}.f{margin-top:10px;font-size:8pt}@page{size:A4 portrait;margin:0}';
 
 /* ---------- Regalplatz: was liegt hier, „Proben hier einräumen“ ---------- */
 function platzOeffnen(id) {
@@ -4389,14 +4671,16 @@ function platzHtml() {
   return `<div id="meldungen" class="meldungen">${meldungenHtml()}</div>
   ${S.platz.einraeumen ? `<div class="einraeumen" role="status"><span style="flex:1">📥 Einräumen auf ${esc(pl.name)} – jede gescannte Probe kommt auf diesen Platz.</span><button type="button" class="sp-knopf" data-aktion="einraeumen-aus">Fertig</button></div>` : ''}
   <div class="kopfzeile"><div><h1>${esc(pl.name)}</h1><div class="zahlen"><span class="mono">${esc(pl.code)}</span> · ${l.length} Probe${l.length === 1 ? '' : 'n'} liegen hier${pl.nichtMehr ? ' · nicht mehr benutzt' : ''}</div></div>
+    <button type="button" class="sp-knopf" data-aktion="platz-pruefen">🔍 Diesen Platz prüfen</button>
     <button type="button" class="${S.platz.einraeumen ? 'sp-knopf' : 'sp-knopf sp-knopf-app'}" data-aktion="einraeumen-${S.platz.einraeumen ? 'aus' : 'an'}" aria-pressed="${S.platz.einraeumen}">${S.platz.einraeumen ? 'Einräumen beenden' : 'Proben hier einräumen'}</button></div>
-  <p class="leise">Ohne „Proben hier einräumen“ verschiebt ein Scan nie etwas – er öffnet nur die Probe.</p>
+  <p class="leise">Ohne „Proben hier einräumen“ verschiebt ein Scan nie etwas – er öffnet nur die Probe. „Diesen Platz prüfen“ (Inventur) vergleicht nur und bucht nie um.${(S.letzteInv || {})[pl.id] ? ' Zuletzt geprüft ' + monatJahr(S.letzteInv[pl.id]) + '.' : ''}</p>
   <section class="karte"><div class="tab-wrap"><table class="liste" style="min-width:900px">${KOPF('Aufbewahren bis', false)}<tbody>${zeilenHtml(l, true, false) || '<tr><td colspan="7" class="leise">Hier liegt laut LagerKit nichts.</td></tr>'}</tbody></table></div></section>
   ${S.platz.rueck.length ? `<section class="karte" style="padding:12px 18px"><div class="ueber">Eben eingeräumt</div><ul class="verlauf">${S.platz.rueck.slice().reverse().map(r => `<li>${esc(r.titel)} von ${esc(platzName(r.von) || '–')} → ${esc(pl.name)}${r.zurueck ? ' (rückgängig)' : ` <button type="button" class="linkknopf" data-aktion="einraeumen-rueck" data-i="${r.i}">rückgängig</button>`}</li>`).join('')}</ul></section>` : ''}`;
 }
 function platzAktion(a, d) {
   if (a === 'einraeumen-an') { if (!werPflicht()) return; S.platz.einraeumen = true; neuZeichnen(); return; }
   if (a === 'einraeumen-aus') { S.platz.einraeumen = false; neuZeichnen(); return; }
+  if (a === 'platz-pruefen') { S.platz.einraeumen = false; geheZu('ansicht=inventur&platz=' + encodeURIComponent(S.platz.id)); return; }
   if (a === 'einraeumen-rueck') { const r = S.platz.rueck.find(x => x.i === +d.i); if (r && !r.zurueck) verschieben(r.ziel, r.von, 'rückgängig (Einräumen)', r); }
 }
 async function verschieben(ziel, nach, warum, rueck) {
@@ -4560,15 +4844,367 @@ function anleitungHtml() {
     <li><b>Verlängern, Nicht entsorgen, Platz ändern:</b> immer mit deinem Namen („Du bist“ oben) und kurzem Grund. Alles bleibt im Verlauf sichtbar.</li>
     <li><b>Fällige einsammeln:</b> Liste nach Regalplatz, als Entsorgungsliste druckbar. Jede gescannte Probe ist als „entsorgt“ vorgemerkt; „Eintragen“ speichert mit Namen und Datum. Gesperrte Proben lassen sich nicht abhaken. Proben mit „Asbest nachgewiesen“ als asbesthaltigen Abfall entsorgen.</li>
     <li><b>Scannen:</b> USB-Handscanner (2D, Tastatur-Modus) – LagerKit-Fenster vorne. Ein Proben-Code öffnet die Probe; ein Platz-Code zeigt, was dort liegt. Nur mit „Proben hier einräumen“ verschiebt ein Scan eine Probe auf diesen Platz. Von Hand geht das Gleiche in der Suche: „26.0612 R2“ und Enter.</li>
+    <li><b>Inventur</b> (Mehr … › Inventur, oder auf einem Platz „Diesen Platz prüfen“): Platz-Code scannen, dann jede Probe auf dem Platz, dann „Platz fertig“. Die lila Leiste „Prüfen“ heißt: Ein Scan bucht nie etwas um (anders als die grüne Leiste „Einräumen“). Danach zeigt LagerKit je Platz: da · fehlt · woanders gebucht · als entsorgt eingetragen · unbekannter Code – jede Korrektur ist ein Klick mit deinem Namen. Ist ein Platz drei Monate nicht geprüft, erinnert eine gelbe Zeile in der Übersicht („später“ blendet sie an diesem PC zwei Wochen aus).</li>
+    <li><b>Blanko-Etiketten</b> (Mehr … › Blanko-Etiketten drucken): für Proben vom Ortstermin und den Aufräumtag. Projekt, Was und Datum von Hand draufschreiben. Später das Etikett scannen → „Neue Rückstellprobe mit diesem Etikett“ → Projekt wählen (oder „Herkunft unklar“). Die Probe bekommt ihre R-Nummer und wird über beide Codes gefunden; ein LagerKit-Etikett zum Überkleben ist freiwillig.</li>
+    <li><b>wohin</b> beim Einsammeln (freiwillig): Restmüll, Gefährlicher Abfall / Entsorger, Asbestabfall (bei „Asbest nachgewiesen“ schon gewählt), zurück an Auftraggeber, Sonstiges. „Eintragen“ legt die Liste als festen Beleg ab – unter „Entsorgt“ ansehen und drucken (als PDF: im Druckdialog „Als PDF speichern“).</li>
     <li><b>Herkunft unklar / Aufräumtag:</b> Unbeschriftete Altproben platzweise erfassen (Datum „unbekannt“ erlaubt, Frist ab heute), drucken, kleben. Eine U-Probe lässt sich später einem Projekt zuordnen – sie bekommt dort die nächste R-Nummer, die U-Nummer bleibt im Verlauf.</li>
   </ol></section>`;
 }
 function ueberHtml() {
   return `<section class="karte anleitung" style="padding:20px 26px"><h1>LagerKit ${APP_VERSION}</h1>
   <p>Rückstellproben im Büro: was, woher, bis wann – und was weg kann. Teil der Spektron-Apps, läuft ohne Netz in Edge oder Chrome.</p>
-  <p><b>Dateien:</b> je Projekt <code>_Spektron/LagerKit/&lt;Nr&gt;_Lager.json</code> (mit datierten Sicherungen in <code>_Sicherungen</code>), im Archivordner <code>_LagerKit\\Index.json</code> (nur Zwischenspeicher), <code>Ohne-Projekt.json</code>, <code>Einstellungen.json</code>. Gelesen, nie geändert: LabelKit-Datei, <code>_Projekt.json</code>, <code>_Ergebnisse.json</code>, BüroKit-Aufgaben, <code>_Spektron-Mitarbeiter.json</code>.</p>
+  <p><b>Dateien:</b> je Projekt <code>_Spektron/LagerKit/&lt;Nr&gt;_Lager.json</code> (mit datierten Sicherungen in <code>_Sicherungen</code>), im Archivordner <code>_LagerKit\\Index.json</code> (nur Zwischenspeicher), <code>Ohne-Projekt.json</code>, <code>Einstellungen.json</code> (mit den reservierten Blanko-Nummern), <code>Inventuren\\</code> und <code>Entsorgungslisten\\</code> (feste Belege, nie geändert). Gelesen, nie geändert: LabelKit-Datei, <code>_Projekt.json</code>, <code>_Ergebnisse.json</code>, BüroKit-Aufgaben, <code>_Spektron-Mitarbeiter.json</code>.</p>
   <p><b>QR-Code:</b> erzeugt mit „QR Code Generator for JavaScript“ von Kazuhiko Arase (MIT-Lizenz), eingebettet. Das Wort „QR Code“ ist eine eingetragene Marke der DENSO WAVE INCORPORATED.</p>
   <h2>Änderungen</h2><ul>${AENDERUNGEN.map(a => `<li><b>${esc(a[0])}</b> (${esc(a[1])}): ${esc(a[2])}</li>`).join('')}</ul></section>`;
+}
+
+/* ---------- Inventur (Plan F1, F2) ----------
+   „Mehr … › Inventur …“ oder „Diesen Platz prüfen“: Platz scannen → alle Proben darauf scannen → „Platz fertig“, mehrere Plätze in einem
+   Durchgang. Beim Prüfen bucht ein Scan nie etwas um. Danach ist jede Korrektur ein Klick mit Namen. Gespeichert in
+   _LagerKit\Inventuren\<JJJJ-MM-TT>_<Kürzel>.json (eine Zeile je geprüftem Platz). */
+const monatJahr = t => K.gueltig(t) ? t.slice(5, 7) + '/' + t.slice(0, 4) : '';
+const kTitel = k => (k.projekt ? k.projekt.nr + ' ' : '') + k.titel;
+const itTitel = it => (it.projektNr ? it.projektNr + ' ' : '') + it.titel;
+function inventurErinnerungHtml(faellig) {
+  const bis = lokal.get('lagerkit-inventur-spaeter') || '';
+  if ((bis && heute() < bis) || !faellig.size) return '';
+  const namen = [...faellig].map(platzName);
+  return `<div class="meldung ruhig" id="invErinnerung"><span>Inventur fällig: ${namen.slice(0, 4).map(esc).join(', ')}${namen.length > 4 ? ' und ' + (namen.length - 4) + ' weitere' : ''} – <button type="button" class="linkknopf" data-aktion="inventur-start">Regal durchgehen →</button></span>
+    <button type="button" class="linkknopf" data-aktion="inventur-spaeter" title="An diesem PC für zwei Wochen ausblenden">später</button></div>`;
+}
+function inventurOeffnen(platzId) {
+  if (!S.inv) {
+    const wer = werPflicht(); if (!wer) { if (S.ansicht !== 'uebersicht') geheZu(''); return; }
+    S.inv = { lauf: K.neueId(), start: jetzt(), wer, aktiv: null, fertig: [], stand: {} };
+  }
+  if (platzId) inventurPlatz(platzId);
+  if (S.platz) S.platz.einraeumen = false;
+  zeige('inventur');
+  if (platzId) history.replaceState(null, '', location.pathname + location.search + '#ansicht=inventur');
+}
+/** Einen Platz zum Prüfen nehmen – nicht, solange auf dem vorigen schon gescannt wurde („Platz fertig“ zuerst) */
+function inventurPlatz(id) {
+  const I = S.inv, pl = platzVon(id); if (!I || !pl) return false;
+  if (I.aktiv && I.aktiv.platz === id) return true;
+  if (I.aktiv && I.aktiv.scans.length) { ton(false); toast(`Erst „Platz fertig“ für ${esc(platzName(I.aktiv.platz))}.`, 'schlecht', { text: 'Platz fertig', tun: () => platzFertig() }); return false; }
+  I.aktiv = { platz: id, start: jetzt(), scans: [] };
+  return true;
+}
+/** Scan in der Inventur: Platz-Code wählt den Platz, Proben-Code wird nur notiert – nie umgebucht */
+function inventurScan(c) {
+  const I = S.inv;
+  if (c.art === 'P') {
+    const pl = ((S.einst && S.einst.plaetze) || []).find(p => p.code === c.code);
+    if (!pl) { ton(false); toast('Unbekannter Regalplatz-Code ' + esc(c.code) + '.', 'schlecht'); return; }
+    if (I.aktiv && I.aktiv.platz === pl.id) { ton(true); toast('Du prüfst schon ' + esc(pl.name) + '.'); return; }
+    if (inventurPlatz(pl.id)) { ton(true); toast('Prüfen: ' + esc(pl.name) + ' – jetzt alle Proben auf diesem Platz scannen.'); neuZeichnen(); }
+    return;
+  }
+  if (!I.aktiv) { ton(false); toast('Erst den Regalplatz scannen (oder unten „prüfen“ wählen) – dann die Proben darauf.', 'schlecht'); return; }
+  const f = findeCode(c), k = f.k || null;
+  if (I.aktiv.scans.some(x => (k && x.key === k.key) || x.code === c.code)) { ton(true); toast(esc(k ? kTitel(k) : c.code) + ' ist schon gescannt.'); return; }
+  I.aktiv.scans.push({ code: c.code, art: c.art, key: k ? k.key : '', frei: !!f.frei });
+  if (!k) { ton(false); toast(esc(c.code) + (f.frei ? ': freies Blanko-Etikett – noch keiner Probe zugeordnet.' : ': unbekannter Code.'), 'schlecht'); }
+  else if (k.status === 'entsorgt') { ton(false); toast(esc(kTitel(k)) + ' ist als entsorgt eingetragen – nichts geändert.', 'schlecht'); }
+  else if (k.platz !== I.aktiv.platz) { ton(false); toast(esc(kTitel(k)) + ' ist auf ' + esc(platzName(k.platz) || 'keinem Platz') + ' gebucht – nichts umgebucht.', 'schlecht'); }
+  else ton(true);
+  neuZeichnen();
+}
+/** „Platz fertig“: betroffene Projekte frisch lesen, abgleichen, die Prüfung speichern */
+async function platzFertig() {
+  const I = S.inv; if (!I || !I.aktiv || I.speichert) return;
+  const wer = werPflicht(); if (!wer) return;
+  I.speichert = true; fussZeichnen();
+  const A = I.aktiv, pl = platzVon(A.platz);
+  try {
+    let alle = alleProben();
+    const ordner = new Set(alle.filter(k => k.projekt && (k.platz === A.platz || A.scans.some(s => s.key === k.key))).map(k => k.projekt.ordner));
+    const namen = A.scans.some(s => !s.key && s.art === 'R') ? await projektOrdner() : [];
+    for (const s of A.scans.filter(x => !x.key && x.art === 'R')) { const c = K.codeLesen(s.code), o = namen.filter(n => (K.projektNr(n) || {}).nr === c.projekt); if (o.length === 1) ordner.add(o[0]); }
+    await indexFrisch([...ordner]);
+    alle = alleProben();
+    const nachKey = new Map(alle.map(k => [k.key, k]));
+    const gescannt = A.scans.map(s => { if (s.key && nachKey.has(s.key)) return { code: s.code, k: nachKey.get(s.key) }; const f = findeCode(K.codeLesen(s.code)); return { code: s.code, k: f.k || null, frei: !!f.frei }; });
+    const erg = K.inventurAbgleich(A.platz, alle.filter(k => k.platz === A.platz), gescannt);
+    const pr = K.inventurPruefung(pl, erg, { lauf: I.lauf, wer, start: A.start, fertig: jetzt() });
+    I.aktiv = null; I.fertig.push(pr);
+    const ok = await inventurSpeichern(pr);
+    const n = erg.fehlt.length + erg.woanders.length + erg.entsorgt.length + erg.unbekannt.length;
+    toast(`${esc(pl.name)} geprüft: ${erg.da.length} da${n ? ' · ' + n + ' zu klären (unten)' : ' – alles stimmt'}.${ok ? '' : ' Nicht gespeichert – bitte „noch einmal speichern“.'}`, ok ? (n ? '' : 'gut') : 'schlecht');
+  } catch (e) { toast('Platz nicht abgeschlossen: ' + esc(e.message || e.name), 'schlecht'); }
+  I.speichert = false; neuZeichnen();
+}
+async function inventurSpeichern(pr) {
+  const I = S.inv, tag = K.berlinTag(pr.fertig), name = K.inventurName(tag, pr.wer);
+  try {
+    const disk = await nacheinander('inventur:' + name, () => K.sicherSchreiben(ioUnter('inventuren', name), 'inventur',
+      { eintraege: [pr], felder: { werte: { tag, wer: pr.wer }, am: '1970-01-01T00:00:00.000Z' } }, { warten: nachpruefMs() }));
+    if (I) I.stand[pr.id] = { datei: name };
+    const i = S.inventuren.findIndex(x => x.name === name);
+    if (i >= 0) S.inventuren[i] = { name, inhalt: disk }; else S.inventuren.push({ name, inhalt: disk });
+    S.letzteInv = K.letzteInventur(S.inventuren.map(x => x.inhalt));
+    return true;
+  } catch (e) { if (I) I.stand[pr.id] = { fehler: e.message || e.name }; return false; }
+}
+const KORR = { nichtGefunden: 'als nicht gefunden eingetragen', gefunden: 'als wieder gefunden eingetragen', umbuchen: 'hierher umgebucht', zurueck: 'Eintrag „entsorgt“ zurückgenommen' };
+/** Eine Korrektur nach der Prüfung – ein Klick, mit Namen; nichts sonst ändert sich */
+function inventurKorrektur(prId, art, key) { return nacheinander('inv-korr', () => inventurKorrekturJetzt(prId, art, key)); }
+async function inventurKorrekturJetzt(prId, art, key) {
+  const I = S.inv, pr = I && I.fertig.find(x => x.id === prId); if (!pr || !KORR[art]) return;
+  if ((pr.korrekturen || []).some(x => x.art === art && x.key === key)) return;   // schon erledigt (Doppelklick)
+  const wer = werPflicht(); if (!wer) return;
+  const it = [...pr.da, ...pr.fehlt, ...pr.woanders, ...pr.entsorgt].find(x => x.key === key); if (!it) return;
+  const ziel = it.u ? { u: true, id: it.id } : { ordner: it.ordner, id: it.id };
+  const wo = 'Inventur ' + de(K.berlinTag(pr.fertig)) + ' auf ' + (platzName(pr.platz) || pr.platzName);
+  const fn = {
+    nichtGefunden: (p, am) => { if (K.entsorgt(p) || K.nichtGefunden(p)) return false; p.ereignisse = (p.ereignisse || []).concat({ id: K.neueId(), art: 'nichtGefunden', bei: 'inventur', wer, am }); },
+    gefunden: (p, am) => { if (!K.nichtGefunden(p)) return false; p.ereignisse = (p.ereignisse || []).concat({ id: K.neueId(), art: 'gefunden', bei: 'inventur', warum: wo, wer, am }); },
+    umbuchen: (p, am) => { if (p.platz === pr.platz || K.entsorgt(p)) return false; p.plaetze = (p.plaetze || []).concat({ id: K.neueId(), von: p.platz || '', nach: pr.platz, wer, warum: wo + ' gefunden', am }); p.platz = pr.platz; },
+    zurueck: (p, am) => { if (!K.entsorgt(p)) return false; p.ereignisse = (p.ereignisse || []).concat({ id: K.neueId(), art: 'entsorgtZurueck', bei: 'inventur', wer, warum: 'doch da – ' + wo + ' gefunden', am }); },
+  }[art];
+  const r = await aendern([ziel], fn);
+  if (r.fehler.length) { toast('Nicht gespeichert: ' + r.fehler.map(esc).join(' · '), 'schlecht'); return; }
+  const am = jetzt();
+  pr.korrekturen = (pr.korrekturen || []).concat({ id: K.neueId(), art, key, titel: itTitel(it), wer, am, erledigt: r.ok.length > 0 });
+  pr.geaendert = am;
+  const ok = await inventurSpeichern(pr);
+  toast(esc(itTitel(it)) + ': ' + (r.ok.length ? KORR[art] : 'war schon so eingetragen – nichts geändert') + '.' + (ok ? '' : ' Die Inventur-Datei ließ sich nicht speichern.'), r.ok.length && ok ? 'gut' : '');
+  neuZeichnen();
+}
+/** Ergebnis eines Platzes; mitKnoepfen = die Korrekturen anbieten (nicht beim Drucken) */
+function pruefungHtml(pr, mitKnoepfen) {
+  const kor = (art, key) => (pr.korrekturen || []).filter(x => x.art === art && x.key === key).pop();
+  const knopf = (art, key, text) => { const k = kor(art, key); return k ? `<span class="marke-k m-gruen">✓ ${esc(k.erledigt ? KORR[art] : 'war schon so eingetragen')} (${esc(k.wer)})</span>` : mitKnoepfen ? `<button type="button" class="sp-knopf klein" data-aktion="inv-korr" data-pr="${esc(pr.id)}" data-art="${art}" data-key="${esc(key)}">${text}</button>` : ''; };
+  const zeile = (it, rechts) => `<tr><td class="nr">${esc(itTitel(it))}</td><td class="fett">${esc(it.was)}</td><td>${esc(it.ort)}</td><td>${rechts}</td></tr>`;
+  const teil = (titel, l, fn, cls) => l.length ? `<div class="inv-teil"><h3 class="${cls || ''}">${titel} · ${l.length}</h3><div class="tab-wrap"><table class="liste inv"><tbody>${l.map(fn).join('')}</tbody></table></div></div>` : '';
+  const zurueck = it => kor('zurueck', it.key);
+  return `${teil('✓ da', pr.da, it => zeile(it, it.nichtGefunden ? `<span class="marke-k m-gelb">war als nicht gefunden eingetragen</span> ${knopf('gefunden', it.key, 'wieder gefunden – eintragen')}` : '<span class="inv-ok">✓ da</span>'), 'inv-ok')}
+    ${teil('fehlt – sollte hier sein, nicht gescannt', pr.fehlt, it => zeile(it, knopf('nichtGefunden', it.key, 'als nicht gefunden eintragen')))}
+    ${teil('woanders gebucht – liegt aber hier', pr.woanders, it => zeile(it, `laut LagerKit auf <b>${esc(platzName(it.platz) || 'keinem Platz')}</b> ${knopf('umbuchen', it.key, 'hierher umbuchen')}`))}
+    ${teil('als entsorgt eingetragen – liegt aber hier', pr.entsorgt, it => zeile(it, `entsorgt ${it.entsorgt ? datumZeit(it.entsorgt.am) + ' · ' + esc(it.entsorgt.wer) : ''} ${knopf('zurueck', it.key, 'doch da – Eintrag zurücknehmen')}${zurueck(it) && it.platz !== pr.platz ? ' ' + knopf('umbuchen', it.key, 'hierher umbuchen') : ''}`))}
+    ${teil('unbekannter Code', pr.unbekannt, u => `<tr><td class="nr">${esc(u.code)}</td><td>${u.frei ? 'freies Blanko-Etikett' : 'LagerKit kennt diesen Code nicht'}</td><td>${u.frei ? 'noch keiner Probe zugeordnet' : ''}</td><td>${u.frei && mitKnoepfen ? `<button type="button" class="sp-knopf klein" data-aktion="blanko-frei" data-code="${esc(u.code)}" data-platz="${esc(pr.platz)}">Neue Rückstellprobe mit diesem Etikett …</button>` : ''}</td></tr>`)}
+    ${!pr.da.length && !pr.fehlt.length && !pr.woanders.length && !pr.entsorgt.length && !pr.unbekannt.length ? '<p class="leise" style="padding:8px 18px">Leer – laut LagerKit liegt hier nichts, und nichts wurde gescannt.</p>' : ''}`;
+}
+function inventurHtml() {
+  const I = S.inv; if (!I) return '<p class="leise">Keine Inventur offen.</p>';
+  const A = I.aktiv, alle = alleProben(), lager = alle.filter(k => k.status !== 'entsorgt'), t = heute();
+  const faellig = new Set(K.inventurFaellig(plaetze(), lager, S.letzteInv || {}, t)), geprueft = new Set(I.fertig.map(p => p.platz));
+  let oben = '';
+  if (A) {
+    const pl = platzVon(A.platz), nachKey = new Map(alle.map(k => [k.key, k]));
+    const erg = K.inventurAbgleich(A.platz, lager.filter(k => k.platz === A.platz), A.scans.map(s => ({ code: s.code, k: s.key ? nachKey.get(s.key) || null : null, frei: s.frei })));
+    const da = new Set(erg.da.map(k => k.key)), erwartet = lager.filter(k => k.platz === A.platz).sort(zeileSort);
+    const sonst = [...erg.woanders.map(k => [kTitel(k), k.was, 'laut LagerKit auf ' + (platzName(k.platz) || 'keinem Platz')]), ...erg.entsorgt.map(k => [kTitel(k), k.was, 'als entsorgt eingetragen']), ...erg.unbekannt.map(u => [u.code, '', u.frei ? 'freies Blanko-Etikett' : 'unbekannter Code'])];
+    oben = `<div class="pruefen" role="status"><span style="flex:1">🔍 Prüfen: ${esc(pl ? pl.name : '')} – prüft nur. Ein Scan bucht hier nie etwas um.</span><button type="button" class="sp-knopf" data-aktion="platz-fertig"${I.speichert ? ' disabled' : ''}>Platz fertig</button></div>
+    <section class="karte"><div class="karte-kopf"><div class="tit"><h2>Laut LagerKit auf ${esc(pl ? pl.name : '')} · ${erwartet.length}</h2><span class="leise" style="font-size:14px">${da.size} von ${erwartet.length} gescannt · jede Probe auf dem Platz scannen, dann „Platz fertig“</span></div></div>
+      <div class="tab-wrap"><table class="liste"><tbody>${erwartet.map(k => `<tr><td style="width:70px">${da.has(k.key) ? '<span class="inv-ok">✓ da</span>' : '<span class="leise">–</span>'}</td><td class="nr">${esc(kTitel(k))}</td><td class="fett">${esc(k.was)}</td><td>${esc(k.u ? 'gefunden: ' + k.gefunden : k.ort)}</td><td>${hinweiseHtml(k)}</td></tr>`).join('') || '<tr><td class="leise">Laut LagerKit liegt hier nichts.</td></tr>'}</tbody></table></div></section>
+    ${sonst.length ? `<section class="karte"><div class="karte-kopf gelb"><div class="tit"><h2>Gescannt, aber nicht hier gebucht · ${sonst.length}</h2><span class="leise" style="font-size:14px">Nichts wird umgebucht – nach „Platz fertig“ entscheidest du mit einem Klick.</span></div></div>
+      <div class="tab-wrap"><table class="liste"><tbody>${sonst.map(x => `<tr><td class="nr">${esc(x[0])}</td><td class="fett">${esc(x[1])}</td><td>${esc(x[2])}</td></tr>`).join('')}</tbody></table></div></section>` : ''}`;
+  }
+  const ps = plaetze().filter(p => !p.nichtMehr || lager.some(k => k.platz === p.id));
+  const liste = `<section class="karte"><div class="karte-kopf"><div class="tit"><h2>Regalplätze</h2><span class="leise" style="font-size:14px">Platz-Code am Regal scannen – oder hier „prüfen“.</span></div></div>
+    <div class="tab-wrap"><table class="liste"><thead><tr><th>Platz</th><th>Proben</th><th>Zuletzt geprüft</th><th></th></tr></thead><tbody>${ps.map(p => { const n = lager.filter(k => k.platz === p.id).length, g = (S.letzteInv || {})[p.id];
+      return `<tr><td class="fett">${esc(p.name)}</td><td>${n}</td><td>${g ? monatJahr(g) : '<span class="leise">noch nie</span>'}${faellig.has(p.id) ? ' <span class="marke-k m-gelb">Inventur fällig</span>' : ''}${geprueft.has(p.id) ? ' <span class="marke-k m-gruen">✓ in diesem Durchgang</span>' : ''}</td>
+        <td class="aktionen">${A && A.platz === p.id ? '<b>wird geprüft</b>' : `<button type="button" class="linkknopf" data-aktion="inv-platz" data-id="${esc(p.id)}">prüfen</button>`}</td></tr>`; }).join('') || '<tr><td class="leise">Keine Regalplätze.</td></tr>'}</tbody></table></div></section>`;
+  const fertig = I.fertig.slice().reverse().map(pr => { const st = I.stand[pr.id] || {};
+    return `<section class="karte"><div class="karte-kopf"><div class="tit"><h2>${esc(platzName(pr.platz) || pr.platzName)} · geprüft ${uhr(pr.fertig)}</h2><span class="leise" style="font-size:14px">${esc(nameVon(pr.wer))} · ${st.datei ? '✓ gespeichert in <code>_LagerKit\\Inventuren\\' + esc(st.datei) + '</code>' : st.fehler ? '<b style="color:var(--sp-err)">nicht gespeichert: ' + esc(st.fehler) + '</b>' : 'speichert …'}</span></div>
+      ${st.fehler ? `<button type="button" class="sp-knopf" data-aktion="inv-nochmal" data-pr="${esc(pr.id)}">noch einmal speichern</button>` : ''}</div>${pruefungHtml(pr, true)}</section>`; }).join('');
+  const frueher = S.inventuren.filter(x => !(x.inhalt.pruefungen || []).some(p => p.lauf === I.lauf)).sort((a, b) => b.name.localeCompare(a.name)).slice(0, 12);
+  return `<div id="meldungen" class="meldungen">${meldungenHtml()}</div>
+  <div class="kopfzeile"><div><h1>Inventur</h1><div class="zahlen">Das Regal Platz für Platz durchgehen: Platz-Code scannen, dann jede Probe auf dem Platz, dann „Platz fertig“. Beim Prüfen wird nie etwas umgebucht – was nicht stimmt, korrigierst du danach mit einem Klick (mit deinem Namen). ${I.fertig.length ? I.fertig.length + ' Platz' + (I.fertig.length === 1 ? '' : 'e') + ' in diesem Durchgang geprüft.' : ''}</div></div></div>
+  ${oben}${fertig}${liste}
+  ${frueher.length ? `<details class="klapp"><summary>Frühere Inventuren · ${frueher.length}</summary><div class="tab-wrap"><table class="liste"><tbody>${frueher.map(x => `<tr><td class="fett">${de(x.inhalt.tag) || esc(x.name)}</td><td>${esc(nameVon(x.inhalt.wer))}</td><td>${(x.inhalt.pruefungen || []).length} Plätze</td><td><button type="button" class="linkknopf" data-aktion="inv-alt-drucken" data-name="${esc(x.name)}">drucken</button></td></tr>`).join('')}</tbody></table></div></details>` : ''}`;
+}
+function inventurFussHtml() {
+  const I = S.inv; if (!I) return '';
+  return `<span class="stand">${I.speichert ? 'speichert …' : I.aktiv ? 'Prüfen: ' + esc(platzName(I.aktiv.platz)) + ' · ' + I.aktiv.scans.length + ' gescannt' : I.fertig.length + ' Platz' + (I.fertig.length === 1 ? '' : 'e') + ' geprüft'} · ${esc(nameVon(I.wer))}</span>`;
+}
+function inventurRechtsHtml() {
+  const I = S.inv; if (!I) return '';
+  if (I.aktiv) return `<button type="button" class="sp-haupt" data-aktion="platz-fertig"${I.speichert ? ' disabled' : ''}>Platz fertig →</button>`;
+  return `<button type="button" class="sp-knopf" data-aktion="inv-drucken"${I.fertig.length ? '' : ' disabled'}>Drucken</button><button type="button" class="sp-haupt" data-aktion="inv-ende">Inventur beenden</button>`;
+}
+function inventurDrucken(prs, kopf) {
+  const css = LISTE_CSS + '.inv-teil h3{font-size:10pt;margin:8px 0 3px}.marke-k{font-weight:700}.inv-ok{font-weight:700}button{display:none}';
+  return druckFenster('Inventur ' + kopf, `<h1>Inventur Rückstellproben</h1><p>${esc(kopf)} · ${prs.length} Platz${prs.length === 1 ? '' : 'e'}</p>` +
+    prs.map(pr => `<h2>${esc(pr.platzName || platzName(pr.platz))} <span style="font-weight:400;font-size:9pt">· ${esc(pr.platzCode || '')} · geprüft ${datumZeit(pr.fertig)} ${uhr(pr.fertig)} · ${esc(nameVon(pr.wer))}</span></h2>${pruefungHtml(pr, false)}`).join('') +
+    `<p class="f">LagerKit · Inventur · ${ABSENDER}</p>`, css);
+}
+async function inventurAktion(a, d) {
+  const I = S.inv;
+  if (a === 'inv-platz') { if (inventurPlatz(d.id)) neuZeichnen(); return; }
+  if (a === 'platz-fertig') return platzFertig();
+  if (a === 'inv-korr') return inventurKorrektur(d.pr, d.art, d.key);
+  if (a === 'inv-nochmal') { const pr = I && I.fertig.find(x => x.id === d.pr); if (pr) { await inventurSpeichern(pr); neuZeichnen(); } return; }
+  if (a === 'inv-drucken' && I) return inventurDrucken(I.fertig, 'Durchgang vom ' + datumZeit(I.start) + ' · ' + nameVon(I.wer));
+  if (a === 'inv-alt-drucken') { const x = S.inventuren.find(y => y.name === d.name); if (x) inventurDrucken(x.inhalt.pruefungen || [], 'vom ' + de(x.inhalt.tag) + ' · ' + nameVon(x.inhalt.wer)); return; }
+  if (a === 'inv-ende') {
+    if (I && I.aktiv && I.aktiv.scans.length) { toast(`Erst „Platz fertig“ für ${esc(platzName(I.aktiv.platz))} – sonst gehen die Scans dieses Platzes verloren.`, 'schlecht', { text: 'Platz fertig', tun: () => platzFertig() }); return; }
+    S.inv = null; geheZu(''); return;
+  }
+}
+
+/* ---------- Blanko-Etiketten (Plan F3, F4) ---------- */
+function blankoEtikettHtml(code) {
+  return `<div class="etk">${balken('RÜCKSTELLPROBE · NICHT ANS LABOR', code)}
+    <div class="etk-mitte"><div class="etk-qr">${K.qrSvg(code, 18, 2)}<div class="etk-code">${esc(code)}</div></div>
+      <div class="etk-text etk-linien"><div class="etk-linie"><span>Projekt</span></div><div class="etk-linie"><span>Was</span></div><div class="etk-linie"><span>Datum</span></div></div></div>
+    <div class="etk-absender">Blanko-Etikett · ${ABSENDER}</div></div>`;
+}
+function blankoDruckDialog() {
+  if (!S.schreiben || S.einstFehler) { toast('In <code>_LagerKit\\Einstellungen.json</code> lässt sich gerade nicht sicher schreiben – ohne reservierte Nummern druckt LagerKit keine Blanko-Etiketten.', 'schlecht'); return; }
+  const letzte = ((S.einst && S.einst.blankoBereiche) || []).filter(b => !b.verworfen).slice().sort((a, b) => b.bis - a.bis).slice(0, 3);
+  dlgOeffnen('Blanko-Etiketten drucken', `<p class="leise" style="margin:0">Für den Aufräumtag und für Proben direkt vom Ortstermin: Etikett aufs Gefäß, Projekt, Was und Datum von Hand draufschreiben – später in LagerKit scannen und erfassen. Jede Nummer gibt es nur einmal: LagerKit reserviert sie vor dem Druck für alle PCs, auch wenn der Druck danach abgebrochen wird.</p>
+    <div class="deckel">${DECKEL}</div>
+    <label class="f">Wie viele Etiketten?<input type="number" name="n" min="1" max="${K.BLANKO_MAX}" value="12" required style="width:120px"></label>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">${startfeldHtml('sfb')}<div style="flex:1 1 300px">${druckInfo}${letzte.length ? `<p class="leise" style="font-size:13px;margin:8px 0 0">Zuletzt reserviert: ${letzte.map(b => `${K.bCode(b.von)}–${K.bCode(b.bis)} (${esc(b.wer)}, ${datumZeit(b.am)})`).join(' · ')}</p>` : ''}</div></div>${werFeld()}`,
+    { ok: 'Nummern reservieren und drucken', pruefen: async fd => {
+      const w = werAus(fd); if (w.fehler) return w.fehler;
+      const n = Math.floor(Number(fd.get('n'))); if (!(n >= 1 && n <= K.BLANKO_MAX)) return `Bitte 1 bis ${K.BLANKO_MAX} Etiketten.`;
+      const start = startB(), lokalMax = Number(lokal.get('lagerkit-blanko-max') || 0) || 0;
+      // Das Fenster jetzt öffnen (noch beim Klick – sonst hält der Browser es nach dem Reservieren für ein Pop-up); gefüllt wird es erst nach der Prüfung
+      const win = window.open('', '_blank', 'width=900,height=760');
+      if (!win) return 'Das Druckfenster wurde blockiert – bitte Pop-ups für LagerKit erlauben. Es wurde nichts reserviert.';
+      win.document.write('<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>LagerKit</title></head><body style="font-family:Arial,sans-serif;padding:24px">LagerKit reserviert die Nummern für alle PCs …</body></html>'); win.document.close();
+      let r;
+      try { r = await nacheinander('einst', () => K.blankoReservieren(ioLagerKit(DATEI.einst), { n, wer: w.wer, mindest: lokalMax + 1, warten: nachpruefMs(), jetzt })); }
+      catch (e) { try { win.close(); } catch (x) { /* schon zu */ } return 'Nicht reserviert, nichts gedruckt: ' + (e.message || e.name); }
+      lokal.set('lagerkit-blanko-max', String(Math.max(lokalMax, r.bereich.bis)));
+      S.einst = await gemeinsamLaden('einst');
+      const codes = []; for (let i = r.bereich.von; i <= r.bereich.bis; i++) codes.push(K.bCode(i));
+      let ok = false;
+      try { ok = !win.closed && druckFenster('Blanko-Etiketten ' + codes[0] + '–' + codes[codes.length - 1], bogenHtml(codes.map(blankoEtikettHtml), start), DRUCK_CSS, win); } catch (e) { ok = false; }
+      toast(`${codes[0]} bis ${codes[codes.length - 1]} reserviert${ok ? ' und zum Drucken geöffnet' : ' – das Druckfenster war schon zu. Die Nummern bleiben reserviert und kommen nie wieder; bitte neu drucken'}.`, ok ? 'gut' : 'schlecht');
+    } });
+  const startB = startfeldVerdrahten('sfb');
+}
+/** Zu einer vergebenen Zuordnung springen (Projekt bzw. „Herkunft unklar“) */
+function blankoOeffnen(z) {
+  if (z.u) {
+    const u = uProbe(z.probe);
+    if (u && u.zugeordnet) { const k = zugeordnetK(alleProben(), u); if (k) probeZeigen(k.key); else geheZu('projekt=' + encodeURIComponent(u.zugeordnet.projekt)); return; }
+    if (u) { uKarte(u); return; }
+    toast('Die Probe zu ' + esc(z.code) + ' ist unter „Herkunft unklar“ nicht zu finden.', 'schlecht'); return;
+  }
+  geheZu('projekt=' + encodeURIComponent(z.ordner) + '&probe=' + encodeURIComponent(z.probe));
+}
+/** Freies Blanko-Etikett gescannt → „Neue Rückstellprobe mit diesem Etikett“ */
+async function blankoFreiDialog(code, platz) {
+  S.einst = await gemeinsamLaden('einst');   // frisch: vielleicht hat ein anderer PC den Code eben vergeben
+  const f = findeCode(K.codeLesen(code));
+  if (f.k) { probeZeigen(f.k.key); return; }
+  if (f.zuordnung) { blankoOeffnen(f.zuordnung); return; }
+  if (!f.frei) { toast(esc(code) + ': unbekanntes Blanko-Etikett.', 'schlecht'); return; }
+  const hier = S.ansicht === 'projekt' && S.p && !S.p.nurLesen ? S.p.name : '';
+  dlgOeffnen('Neue Rückstellprobe mit diesem Etikett', `<p style="margin:0">Das Blanko-Etikett <b class="mono">${esc(code)}</b> gehört noch zu keiner Probe. Zu welchem Projekt gehört sie?</p>
+    <div class="aktionen">${hier ? `<button type="button" class="sp-knopf sp-knopf-app" data-bf="hier">In dieses Projekt (${esc(S.p.nr)})</button>` : ''}<button type="button" class="sp-knopf${hier ? '' : ' sp-knopf-app'}" data-bf="projekt">Projekt wählen …</button><button type="button" class="sp-knopf" data-bf="unklar">Herkunft unklar …</button></div>
+    <p class="leise" style="font-size:13px;margin:0">Die Probe bekommt im Projekt die nächste R-Nummer, die bleibt ihre Bezeichnung. ${esc(code)} gehört danach fest zu ihr – Scan, Inventur und Einsammeln finden sie über beide Codes. Ein LagerKit-Etikett zum Überkleben ist freiwillig.</p>`, { ok: false });
+  $('dlgInhalt').querySelectorAll('[data-bf]').forEach(b => b.addEventListener('click', () => {
+    const w = b.dataset.bf;
+    if (w === 'hier') { $('dlg').close(); blankoInsProjekt(code, hier, platz); }
+    else if (w === 'projekt') projektWaehlenDialog({ titel: esc(code) + ' – Projekt wählen', tun: o => blankoInsProjekt(code, o, platz) });
+    else blankoUnklarDialog(code, platz);
+  }));
+}
+async function blankoInsProjekt(code, ordner, platz) {
+  const wer = werPflicht(); if (!wer) return;
+  try {
+    const dir = await S.archiv.getDirectoryHandle(ordner), nr = K.projektNr(ordner).nr, { lager } = await lagerLesen(dir, nr);
+    if (lager && lager.kaputt) throw new Error('die LagerKit-Datei des Projekts ist nicht lesbar oder neuer');
+  } catch (e) { toast('Nicht zugeordnet: ' + esc(e.message || e.name), 'schlecht'); return; }
+  const id = K.neueId(), am = jetzt();
+  let r;
+  try { r = await nacheinander('einst', () => K.blankoZuordnen(ioLagerKit(DATEI.einst), { code, ordner, u: false, probe: id, wer, am }, { warten: nachpruefMs() })); }
+  catch (e) { toast('Nicht zugeordnet: ' + esc(e.message || e.name), 'schlecht'); return; }
+  S.einst = await gemeinsamLaden('einst');
+  if (r.schon) { toast(esc(code) + ' gehört schon zu einer Probe – sie wird geöffnet.', 'schlecht'); blankoOeffnen(r.schon); return; }
+  if (!(S.p && S.p.name === ordner)) {
+    if (!(await projektVerlassen())) return;
+    history.replaceState(null, '', location.pathname + location.search + '#projekt=' + encodeURIComponent(ordner));
+    await projektOeffnen(ordner, '');
+  }
+  const P = S.p;
+  if (!P || P.name !== ordner || P.nurLesen) { toast(esc(code) + ' ist ' + esc(ordner) + ' zugeordnet, aber die Probe ließ sich dort nicht anlegen – bitte das Projekt prüfen.', 'schlecht'); return; }
+  const p = neueProbe(P, Object.assign({ id, erfasst: am, erfasstVon: wer, codes: [{ code, art: 'blanko', am, wer }] }, platz && platzVon(platz) ? { platz } : {}));
+  P.gewaehlt = p.id; neuZeichnen();
+  await projektSpeichern(P);
+  const i = document.querySelector(`input[data-feld="was"][data-id="${CSS.escape(p.id)}"]`); if (i) i.focus();
+  toast(`${esc(code)} ist jetzt ${esc(P.nr)} R${p.nr} – bitte Was, Raum/Ort und Probenahme eintragen. Ein LagerKit-Etikett ist freiwillig.`, 'gut');
+}
+function blankoUnklarDialog(code, platz) {
+  dlgOeffnen('Herkunft unklar · ' + esc(code), `<p class="leise" style="margin:0">Weiß niemand das Projekt, kommt die Probe unter „Herkunft unklar“ (U-Nummer). Später lässt sie sich einem Projekt zuordnen – ${esc(code)} bleibt dabei an ihr.</p>
+    <label class="f">Was (Pflicht)<input type="text" name="was" maxlength="300" placeholder="z. B. Brandschutt" autofocus></label>
+    <label class="f">Wo gefunden (Pflicht)<input type="text" name="gefunden" maxlength="300" placeholder="z. B. Regal A oben, Karton ohne Aufschrift"></label>
+    <label class="f">Regalplatz (Pflicht)<select name="platz">${platzOptionen(platz || lokal.get('lagerkit-letzter-platz') || '', true)}</select></label>
+    <label class="f">Datum der Probenahme (TT.MM.JJJJ – leer lassen, wenn unbekannt)<input type="text" name="datum" placeholder="unbekannt"></label>${werFeld()}`,
+    { ok: 'Speichern', pruefen: async fd => {
+      const w = werAus(fd); if (w.fehler) return w.fehler;
+      const was = K.text(String(fd.get('was') || ''), 300).trim(), gefunden = K.text(String(fd.get('gefunden') || ''), 300).trim(), pl = String(fd.get('platz') || ''), dt = String(fd.get('datum') || '').trim(), datum = K.ausDe(dt);
+      if (!was) return 'Bitte „Was“ eintragen.'; if (!gefunden) return 'Bitte „Wo gefunden“ eintragen.'; if (!platzVon(pl)) return 'Bitte den Regalplatz wählen.';
+      if (dt && !datum) return 'Datum bitte als TT.MM.JJJJ – oder leer lassen.';
+      const id = K.neueId(), am = jetzt();
+      const r = await nacheinander('einst', () => K.blankoZuordnen(ioLagerKit(DATEI.einst), { code, ordner: '', u: true, probe: id, wer: w.wer, am }, { warten: nachpruefMs() }));
+      S.einst = await gemeinsamLaden('einst');
+      if (r.schon) { $('dlg').close(); toast(esc(code) + ' gehört schon zu einer Probe – sie wird geöffnet.', 'schlecht'); blankoOeffnen(r.schon); return false; }
+      let neu;
+      await nacheinander('ohne', async () => {
+        const disk = K.dateiLesen('ohne', await leseText(S.lk, DATEI.ohne));
+        neu = { id, nr: K.naechsteNr((disk && !disk.kaputt && disk.proben) || []), erfasst: am, erfasstVon: w.wer, geaendert: am, was, ort: '', attribute: '', art: 'Sonstige', behaelter: '', probenahme: datum, probenahmeUnbekannt: !datum,
+          von: '', platz: pl, notiz: '', verdacht: false, quelle: null, nachtraeglich: !datum, gefunden, codes: [{ code, art: 'blanko', am, wer: w.wer }], fristen: [], sperren: [], plaetze: [], ereignisse: [], gedruckt: [], ansLabor: [], wohin: '' };
+        const d2 = await gemeinsamSchreiben('ohne', { eintraege: [neu] });
+        neu = d2.proben.find(x => x.id === id) || neu;
+      });
+      lokal.set('lagerkit-letzter-platz', pl);
+      toast(`${esc(code)} ist jetzt U${neu.nr} (Herkunft unklar).`, 'gut', { text: 'LagerKit-Etikett drucken', tun: () => { const u = uProbe(id); if (u) druckDialog([{ u: true, p: u }]); } });
+      neuZeichnen();
+    } });
+}
+
+/* ---------- Entsorgungslisten als feste Belege (Plan F6) ---------- */
+/** Eine Zeile der Liste, so wie sie gerade dasteht (rohe Texte, kein HTML) */
+function belegZeile(k, ergebnis, wv) {
+  const genommen = k.unbekannt || !k.probenahme ? (k.nachtraeglich ? 'nachträglich erfasst' : 'unbekannt') : de(k.probenahme) + (k.von ? ' · ' + k.von : '');
+  const hinweise = [k.asbest ? 'Asbest nachgewiesen – als asbesthaltigen Abfall entsorgen' : k.verdacht ? 'Asbest / schadstoffhaltig (Verdacht)' : '', k.sperre ? 'gesperrt – nicht entsorgen: ' + k.sperre.warum + ' (' + k.sperre.wer + ')' : '',
+    k.quelle === 'vorlaeufig' && !k.u ? 'kein Bericht übergeben – bitte prüfen' : ''].filter(Boolean);
+  return { key: k.key, projekt: k.projekt ? { nr: k.projekt.nr, ordner: k.projekt.ordner, titel: projektTitel(k.projekt) } : null, u: !!k.u, id: k.id, titel: k.titel, code: k.code || '', blanko: k.blanko || [],
+    was: k.was || '', ort: k.u ? 'gefunden: ' + (k.gefunden || '') : (k.ort || ''), platz: platzName(k.platz), genommen, bis: k.bis || '', rest: k.rest || '', hinweise,
+    ergebnis, wohin: ergebnis === 'entsorgt' && wv ? K.wohinText(wv.w, wv.frei) : '', eingetragen: false, nichtEingetragen: '' };
+}
+async function belegAblegen(beleg) {
+  try {
+    const name = await nacheinander('belege', () => K.belegSchreiben(ioBelege(), beleg, { warten: nachpruefMs() }));
+    S.belege.push({ name, inhalt: beleg }); S.belegOffen = null; meldung('', '', 'beleg');
+    return name;
+  } catch (e) {
+    S.belegOffen = beleg;
+    meldung('err', `Die Entsorgungsliste ließ sich nicht als Beleg ablegen (${esc(e.message || e.name)}). Die Proben selbst sind eingetragen. <button type="button" class="sp-knopf klein" data-aktion="beleg-nochmal">Beleg noch einmal ablegen</button>`, 'beleg');
+    return null;
+  }
+}
+const belegZahl = b => (b.proben || []).filter(x => x.eingetragen && (x.ergebnis === 'entsorgt' || x.ergebnis === 'nichtGefunden')).length;
+const belegTitel = b => { const n = belegZahl(b); return `Liste vom ${de(b.tag)} · ${b.wer} · ${n} Probe${n === 1 ? '' : 'n'}`; };
+function belegeHtml() {
+  const l = (S.belege || []).slice().sort((a, b) => String(b.inhalt.am).localeCompare(String(a.inhalt.am)));
+  if (!l.length) return '';
+  return `<div class="belege"><div class="ueber" style="padding:10px 18px 6px">Entsorgungslisten – feste Belege, werden nie geändert</div>
+    ${(S.belegeAlle ? l : l.slice(0, 8)).map(b => `<button type="button" class="beleg-zeile" data-aktion="beleg-zeigen" data-name="${esc(b.name)}">${esc(belegTitel(b.inhalt))}</button>`).join('')}
+    ${l.length > 8 ? `<button type="button" class="linkknopf" style="margin:4px 18px" data-aktion="belege-alle">${S.belegeAlle ? 'weniger zeigen' : 'alle ' + l.length + ' zeigen'}</button>` : ''}</div>`;
+}
+const ERGEBNIS = { entsorgt: 'entsorgt', nichtGefunden: 'nicht gefunden', behalten: 'behalten', offen: 'offen – nichts eingetragen', gesperrt: 'gesperrt – nicht entsorgt' };
+function belegTabelle(b) {
+  return `<table class="liste"><thead><tr><th>Platz</th><th>Nr.</th><th>Projekt</th><th>Was</th><th>Raum/Ort</th><th>Genommen</th><th>bis</th><th>Hinweis</th><th>Ergebnis</th><th>wohin</th></tr></thead><tbody>
+    ${(b.proben || []).map(z => `<tr><td>${esc(z.platz)}</td><td class="m nr">${esc(z.titel)}</td><td>${esc(z.projekt ? z.projekt.titel : 'Herkunft unklar')}</td><td><b>${esc(z.was)}</b>${z.rest ? '<br>Rest von ' + esc(z.rest) : ''}</td><td>${esc(z.ort)}</td><td>${esc(z.genommen)}</td><td>${de(z.bis)}</td>
+      <td>${z.hinweise.map(esc).join('<br>')}</td><td><b>${esc(ERGEBNIS[z.ergebnis] || z.ergebnis)}</b>${z.verlaengertBis ? '<br>verlängert bis ' + de(z.verlaengertBis) + (z.warum ? ' – ' + esc(z.warum) : '') : ''}${z.nichtEingetragen ? '<br><i>nicht eingetragen: ' + esc(z.nichtEingetragen) + '</i>' : ''}</td><td>${esc(z.wohin)}</td></tr>`).join('')}</tbody></table>`;
+}
+const belegKopf = (b, name) => `Eingetragen am ${de(b.tag)} um ${uhr(b.am)} von ${esc(b.werName || b.wer)} (${esc(b.wer)}) · ${belegZahl(b)} Proben eingetragen · fester Beleg <code>_LagerKit\\Entsorgungslisten\\${esc(name)}</code> – wird nie geändert`;
+function belegZeigen(name) {
+  const x = S.belege.find(y => y.name === name); if (!x) return;
+  const b = x.inhalt;
+  dlgOeffnen('Entsorgungsliste vom ' + de(b.tag) + ' · ' + esc(b.wer), `<p class="leise" style="margin:0;font-size:13.5px">${belegKopf(b, name)}</p><div class="liste-scroll">${belegTabelle(b)}</div>
+    <p class="leise" style="font-size:13px;margin:0">Als PDF: „Drucken“ und im Druckdialog „Als PDF speichern“ wählen.</p>`,
+    { ok: 'Drucken', abbrechen: 'Schließen', pruefen: async () => {
+      druckFenster('Entsorgungsliste ' + de(b.tag) + ' ' + b.wer, `<h1>Entsorgungsliste Rückstellproben</h1><p>${belegKopf(b, name)}</p>${belegTabelle(b)}<p class="f">${ABSENDER}</p>`, LISTE_CSS + 'code{font-family:Consolas,monospace}');
+    } });
 }
 
 /* ---------- Scanner (USB-Handscanner als Tastatur) ----------
@@ -4603,16 +5239,28 @@ function scanTaste(e) {
 }
 function scanReset() { SCAN.puffer = ''; SCAN.abstaende = []; SCAN.ziel = null; SCAN.vorher = null; }
 /** Gefunden zu einem Code: { k (Übersicht-Eintrag) } oder Platz */
+const zugeordnetK = (alle, u) => alle.find(k => k.projekt && u.zugeordnet && k.projekt.ordner === u.zugeordnet.projekt && k.nr === u.zugeordnet.nr) || null;
 function findeCode(c) {
+  if (!c) return {};
   if (c.art === 'P') return { platz: ((S.einst && S.einst.plaetze) || []).find(p => p.code === c.code) || null };
   const alle = alleProben();
-  if (c.art === 'U') { const u = K.da((S.ohne && S.ohne.proben) || []).find(x => x.nr === c.nr); return { u, k: alle.find(k => k.u && k.nr === c.nr) || null }; }
+  if (c.art === 'U') { const u = K.da((S.ohne && S.ohne.proben) || []).find(x => x.nr === c.nr); return { u, k: alle.find(k => k.u && k.nr === c.nr) || (u && u.zugeordnet ? zugeordnetK(alle, u) : null) }; }
+  if (c.art === 'B') {   // Blanko-Etikett: über die Probe (codes) – sonst über die Zuordnung in den Einstellungen (der Index kann hinterherhinken)
+    const st = K.blankoStand(S.einst, c.code);
+    let k = alle.find(x => (x.blanko || []).includes(c.code)) || null;
+    if (!k && st.zuordnung) {
+      const z = st.zuordnung, u = z.u ? uProbe(z.probe) : null;
+      k = z.u ? (u ? (u.zugeordnet ? zugeordnetK(alle, u) : alle.find(x => x.u && x.id === u.id) || null) : null) : alle.find(x => x.projekt && x.projekt.ordner === z.ordner && x.id === z.probe) || null;
+    }
+    return { k, zuordnung: st.zuordnung, frei: !k && !st.zuordnung && !!st.reserviert };
+  }
   return { k: alle.find(k => !k.u && k.projekt && k.projekt.nr === c.projekt && k.nr === c.nr) || null };
 }
 /** Scan oder Suche („26.0612 R2“) */
 async function codeVerarbeiten(c, roh, scan) {
   if ($('dlg').open) { if (scan) { ton(false); toast('Erst den offenen Dialog schließen.'); } return; }
-  const f = findeCode(c), titel = c.art === 'P' ? c.code : c.art === 'U' ? 'U' + c.nr : c.projekt + ' R' + c.nr;
+  if (S.ansicht === 'inventur' && S.inv) return inventurScan(c);   // Prüfen: nie umbuchen
+  const f = findeCode(c), titel = c.art === 'P' || c.art === 'B' ? c.code : c.art === 'U' ? 'U' + c.nr : c.projekt + ' R' + c.nr;
   if (c.art === 'P') {
     if (!f.platz) { ton(false); toast('Unbekannter Regalplatz-Code ' + esc(c.code) + '.', 'schlecht'); return; }
     if (S.ansicht === 'projekt' && S.p && S.p.gewaehlt) {   // im Erfassen: Regalplatz der gewählten Zeile
@@ -4643,6 +5291,11 @@ async function codeVerarbeiten(c, roh, scan) {
     if (f.k.status === 'entsorgt') { ton(false); toast(esc(titel) + ' ist als entsorgt eingetragen – nichts verschoben.', 'schlecht'); return; }
     return verschieben(zielVon(f.k), S.platz.id, 'eingeräumt (Scan)');
   }
+  if (c.art === 'B' && !f.k) {
+    if (f.zuordnung) { ton(true); blankoOeffnen(f.zuordnung); return; }
+    if (f.frei) { ton(true); blankoFreiDialog(c.code, S.ansicht === 'platz' && S.platz ? S.platz.id : ''); return; }
+    ton(false); toast(esc(titel) + ': unbekanntes Blanko-Etikett – diese Nummer hat LagerKit nie reserviert.', 'schlecht'); return;
+  }
   if (!f.k && !f.u) {
     if (c.art === 'R') {   // vielleicht noch nicht im Index: Projekt mit dieser Nummer öffnen
       const namen = await projektOrdner(), o = namen.filter(n => (K.projektNr(n) || {}).nr === c.projekt);
@@ -4653,6 +5306,7 @@ async function codeVerarbeiten(c, roh, scan) {
   }
   ton(true);
   if (c.art === 'U') { uKarte(f.u); return; }
+  if (f.k.u) { const u = uProbe(f.k.id); if (u) uKarte(u); return; }
   if (S.ansicht === 'projekt' && S.p && S.p.name !== f.k.projekt.ordner) {
     toast(esc(titel) + ' gehört zu ' + esc(projektTitel(f.k.projekt)) + '.', '', { text: 'Dort öffnen', tun: () => probeZeigen(f.k.key) }); return;
   }

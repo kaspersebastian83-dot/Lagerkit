@@ -33,6 +33,8 @@ jobs:
         env:
           LAGERKIT_QR_PFLICHT: '1'
           LAGERKIT_PZ_PFLICHT: '1'
+      - name: Kern 0.2.0 – Inventur, Erinnerung, Blanko-Nummern mit zweitem PC, Beleg, 0.1.0 ↔ 0.2.0
+        run: node tests/kern-020.cjs
       - name: Spektron-Look, spektron-ordner.js, Offline-Dateien, kein Netz, Farbe
         run: node tests/dateien.cjs
         env:
@@ -54,6 +56,11 @@ jobs:
           "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
       - name: Erfassen, LabelKit, Etikett, Verlängern, Einsammeln mit Scanner, Regalplatz-Scan, Aufräumtag
         run: node tests/browser.cjs
+        env:
+          LANG: C.UTF-8
+          LAGERKIT_BILDER: bilder
+      - name: 0.2.0 – Inventur mit Scanner-Stoß, Blanko drucken → scannen → erfassen, Einsammeln mit „wohin“ → Beleg
+        run: node tests/browser-020.cjs
         env:
           LANG: C.UTF-8
           LAGERKIT_BILDER: bilder
