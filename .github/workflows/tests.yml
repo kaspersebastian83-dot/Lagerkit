@@ -1,0 +1,64 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: Kern und Dateien (Node)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: BerichtKit, LexiKit, Projektzentrale daneben holen (Look, spektron-ordner.js, Ordnername byte-gleich)
+        run: |
+          for r in berichtkit lexikit projektzentrale; do git clone --quiet --depth 1 https://github.com/kaspersebastian83-dot/$r.git ../$r; done
+      - name: jsQR nur für den Test (liest den erzeugten QR-Code zurück)
+        run: npm install --no-save --no-package-lock --prefix "$RUNNER_TEMP/qr" jsqr@1.4.0 && echo "NODE_PATH=$RUNNER_TEMP/qr/node_modules" >> "$GITHUB_ENV"
+      - name: Kern – Frist, Nummern, Codes, Tastatur-Layout, QR, Zusammenführen, Index
+        run: node tests/kern.cjs
+        env:
+          LAGERKIT_QR_PFLICHT: '1'
+          LAGERKIT_PZ_PFLICHT: '1'
+      - name: Spektron-Look, spektron-ordner.js, Offline-Dateien, kein Netz, Farbe
+        run: node tests/dateien.cjs
+        env:
+          LAGERKIT_LOOK_PFLICHT: '1'
+
+  browser:
+    name: Browser (Chromium)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Playwright (fest, nicht im Repository)
+        run: |
+          npm install --no-save --no-package-lock --prefix "$RUNNER_TEMP/pw" playwright@1.56.1
+          echo "NODE_PATH=$RUNNER_TEMP/pw/node_modules" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Erfassen, LabelKit, Etikett, Verlängern, Einsammeln mit Scanner, Regalplatz-Scan, Aufräumtag
+        run: node tests/browser.cjs
+        env:
+          LANG: C.UTF-8
+          LAGERKIT_BILDER: bilder
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: bildschirmfotos
+          path: bilder/
