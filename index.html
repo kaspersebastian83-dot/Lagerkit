@@ -3463,7 +3463,7 @@ async function route() {
   const h = new URLSearchParams(location.hash.slice(1));
   const projekt = h.get('projekt'), ansicht = h.get('ansicht');
   if (projekt) { await projektOeffnen(projekt.normalize('NFC'), h.get('probe') || ''); return; }
-  S.p = null;
+  if (!(await projektVerlassen())) return;
   if (ansicht === 'einsammeln') return einsammelnOeffnen();
   if (ansicht === 'platz') return platzOeffnen(h.get('id'));
   if (ansicht === 'aufraeumen') return aufraeumenOeffnen();
@@ -3660,7 +3660,7 @@ const uProbe = id => K.da((S.ohne && S.ohne.proben) || []).find(u => u.id === id
 /* ---------- Im Projekt erfassen ---------- */
 async function projektOeffnen(name, probeId) {
   if (S.p && S.p.name === name) { S.p.blitz = probeId || ''; S.p.gewaehlt = probeId || S.p.gewaehlt; zeige('projekt'); return; }
-  if (S.p && S.p.aus.size) await projektSpeichern();
+  if (!(await projektVerlassen())) return;
   const dir = await S.archiv.getDirectoryHandle(name).catch(() => null);
   const nr = (K.projektNr(name) || {}).nr;
   if (!dir || !nr) { toast(`Projektordner „${esc(name)}“ nicht gefunden.`, 'schlecht'); geheZu(''); return; }
@@ -3710,10 +3710,26 @@ function geaendert(p, still) {
   speichernPlanen(still ? 3000 : 1200);
 }
 let speicherTimer = 0;
-function speichernPlanen(ms) { clearTimeout(speicherTimer); speicherTimer = setTimeout(() => projektSpeichern(), ms); fussZeichnen(); }
+/** Der Zeitgeber hält das Projekt fest: Wird es inzwischen verlassen, wird trotzdem dieses Projekt gespeichert (Codex, PR #1) */
+function speichernPlanen(ms) { clearTimeout(speicherTimer); const P = S.p; speicherTimer = setTimeout(() => projektSpeichern(P), ms); fussZeichnen(); }
+/** Projekt verlassen: Ausstehendes erst speichern. Klappt das nicht, bleibt das Projekt offen (zurück zur Projekt-Adresse) → false */
+async function projektVerlassen() {
+  const P = S.p; if (!P) return true;
+  if (P.aus.size || P.speichert) {
+    await projektSpeichern(P);
+    if (P.aus.size && !P.nurLesen) {
+      history.replaceState(null, '', location.pathname + location.search + '#projekt=' + encodeURIComponent(P.name));
+      S.ansicht = 'projekt'; neuZeichnen();
+      toast('Nicht gespeichert' + (P.speichernFehler ? ': ' + esc(P.speichernFehler) : '') + ' – das Projekt bleibt offen, damit nichts verloren geht. Bitte „Noch einmal“ unten links.', 'schlecht');
+      return false;
+    }
+  }
+  if (S.p === P) S.p = null;
+  return true;
+}
 /** Eigene Änderungen ins Projekt schreiben (neu lesen, zusammenführen, schreiben, zurücklesen) und die Übersicht nachziehen */
-function projektSpeichern() {
-  const P = S.p; if (!P) return Promise.resolve();
+function projektSpeichern(projekt) {
+  const P = projekt || S.p; if (!P) return Promise.resolve();
   clearTimeout(speicherTimer);
   return nacheinander('projekt:' + P.name, async () => {
     if (!P.aus.size || P.nurLesen) return;
@@ -3741,7 +3757,7 @@ function projektSpeichern() {
     }
     P.speichert = false;
     if (S.p === P) fussZeichnen();
-    if (P.aus.size && !P.speichernFehler) speichernPlanen(1200);
+    if (P.aus.size && !P.speichernFehler) { clearTimeout(speicherTimer); speicherTimer = setTimeout(() => projektSpeichern(P), 1200); }
   });
 }
 window.addEventListener('beforeunload', e => { if (S.p && (S.p.aus.size || S.p.speichert)) { projektSpeichern(); e.preventDefault(); e.returnValue = ''; } });
@@ -4158,7 +4174,7 @@ function uZuordnenDialog(id) {
       });
       const uu = JSON.parse(JSON.stringify(u)); uu.zugeordnet = { projekt: ordner, nr: neu.nr, code: K.rCode(nr, neu.nr), am, wer }; uu.geaendert = am; uu._basis = u;
       await nacheinander('ohne', () => gemeinsamSchreiben('ohne', { eintraege: [uu] }));
-      S.p = null;
+      if (!(await projektVerlassen())) return;
       geheZu('projekt=' + encodeURIComponent(ordner) + '&probe=' + encodeURIComponent(neu.id));
       toast(`U${u.nr} ist jetzt ${esc(nr)} R${neu.nr}. Bitte ein neues Etikett drucken und das alte überkleben.`, 'gut');
     } catch (e) { toast('Nicht zugeordnet: ' + esc(e.message || e.name), 'schlecht'); }

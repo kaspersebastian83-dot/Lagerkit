@@ -202,6 +202,13 @@ const schritt = t => console.log('· ' + t);
     assert.equal(await r4.locator('select[data-feld="platz"]').inputValue(), 'pa2', 'Platz-Scan füllt „Regalplatz“');
     await ruhig();
     assert.equal((await lies(D.P.neu + '/_Spektron/LagerKit/26.0612_Lager.json')).proben.find(p => p.nr === 4).was, 'Asche');
+    // tippen und sofort zur Übersicht (Codex, PR #1): die Änderung wird vor dem Verlassen gespeichert
+    await page.click('tr[data-probe]:last-child td:first-child');
+    await page.fill('#detail input[data-feld="notiz"]', 'evtl. DepV');
+    await page.click('#zurUebersicht');
+    await page.waitForSelector('#suche'); await ruhig();
+    assert.equal((await lies(D.P.neu + '/_Spektron/LagerKit/26.0612_Lager.json')).proben.find(p => p.nr === 4).notiz, 'evtl. DepV', 'nichts verloren beim Verlassen');
+    await page.goto(url + '#projekt=' + encodeURIComponent(D.P.neu)); await page.evaluate(H); await page.waitForSelector('tr[data-probe]'); await ruhig();
 
     /* ---------- 8. Fällige einsammeln mit Scanner ---------- */
     schritt('Fällige einsammeln');
