@@ -55,6 +55,8 @@ const LAGER = { bericht: D.P.bericht + '/_Spektron/LagerKit/26.0571_Lager.json',
   const ruhig = () => page.waitForFunction(() => window.LagerKit && !window.LagerKit.schreibt && (!window.LagerKit.S.lauf || window.LagerKit.S.lauf.fertigAm) && (!window.LagerKit.S.p || (!window.LagerKit.S.p.aus.size && !window.LagerKit.S.p.speichert)) && !(window.LagerKit.S.inv && window.LagerKit.S.inv.speichert), null, { timeout: 20000 });
   const scan = async code => { await page.keyboard.type(code, { delay: 8 }); await page.keyboard.press('Enter'); };
   const toastText = () => page.textContent('#toast');
+  /** Meldung abwarten (die App arbeitet nach dem Klick weiter – auf langsamen Rechnern dauert das) */
+  const toastWarte = async re => { try { await page.waitForFunction(q => new RegExp(q[0], q[1]).test(document.querySelector('#toast').textContent), [re.source, re.flags], { timeout: 15000 }); } catch (e) { assert.match(await toastText(), re); } };
   const blitzR2 = () => page.waitForFunction(() => { const i = document.querySelector('tr.blitz input[data-feld="was"]'); return i && i.value === 'Brandschutt (Blanko)'; });
   const gehe = async hash => { await page.goto(url + (hash ? '#' + hash : '')); await page.evaluate(H); await page.waitForSelector('#fussIn > *'); await ruhig(); };
   const mehr = async aktion => { await page.click('#mehr summary'); await page.click(`#mehr [data-aktion="${aktion.a}"]${aktion.w ? `[data-wert="${aktion.w}"]` : ''}`); };
@@ -127,7 +129,7 @@ const LAGER = { bericht: D.P.bericht + '/_Spektron/LagerKit/26.0571_Lager.json',
     await druck2.waitForSelector('.etk'); await druck2.close(); await ruhig();
     einst = await lies('_LagerKit/Einstellungen.json');
     assert.deepEqual(einst.blankoBereiche.map(b => [b.von, b.bis]), [[1, 3], [4, 5]], 'reservierter Bereich kommt nie wieder');
-    assert.match(await toastText(), /LKB0004 bis LKB0005 reserviert/);
+    await toastWarte(/LKB0004 bis LKB0005 reserviert/);
 
     /* ---------- 3. Freies Blanko-Etikett scannen → Probe im Projekt; über beide Codes finden ---------- */
     schritt('Blanko scannen → Probe im Projekt');
@@ -137,7 +139,7 @@ const LAGER = { bericht: D.P.bericht + '/_Spektron/LagerKit/26.0571_Lager.json',
     await page.fill('#pwSuche', '26.0612');
     await page.click(`[data-pw="${D.P.neu}"]`);
     await page.waitForSelector('h1:has-text("Rückstellproben in diesem Projekt")'); await ruhig();
-    assert.match(await toastText(), /LKB0002 ist jetzt 26\.0612 R2/);
+    await toastWarte(/LKB0002 ist jetzt 26\.0612 R2/);
     const neueZeile = page.locator('tr.gewaehlt');
     assert.match(await neueZeile.textContent(), /R2/);
     assert.match(await page.textContent('#detail'), /Blanko-Etikett LKB0002/);
@@ -168,7 +170,7 @@ const LAGER = { bericht: D.P.bericht + '/_Spektron/LagerKit/26.0571_Lager.json',
     await page.fill('dialog[open] input[name="gefunden"]', 'Regal A oben, Karton');
     await page.selectOption('dialog[open] select[name="platz"]', 'pa1');
     await page.click('#dlgOk'); await ruhig();
-    assert.match(await toastText(), /LKB0003 ist jetzt U1/);
+    await toastWarte(/LKB0003 ist jetzt U1/);
     let ohne = await lies('_LagerKit/Ohne-Projekt.json');
     assert.deepEqual([ohne.proben[0].nr, ohne.proben[0].codes[0].code, ohne.proben[0].platz, ohne.proben[0].probenahmeUnbekannt], [1, 'LKB0003', 'pa1', true]);
     await page.focus('h1'); await scan('LKB0003');
@@ -203,7 +205,7 @@ const LAGER = { bericht: D.P.bericht + '/_Spektron/LagerKit/26.0571_Lager.json',
     assert.match(await liste.textContent('body'), /wohin.*Restmüll/s); await liste.close();
     await bild('5-einsammeln');
     await page.click('[data-aktion="eintragen"]'); await ruhig();
-    assert.match(await toastText(), /3 Proben eingetragen von Tim Test.*fester Beleg/);
+    await toastWarte(/3 Proben eingetragen von Tim Test.*fester Beleg/);
     const r1 = (await lies(LAGER.bericht)).proben.find(p => p.id === 'b-r1'), nr1 = (await lies(LAGER.neu)).proben.find(p => p.id === 'n-r1'), o1 = (await lies(LAGER.ohne)).proben[0];
     assert.deepEqual([r1.ereignisse.at(-1).art, r1.ereignisse.at(-1).wohin, r1.wohin], ['entsorgt', 'Restmüll', 'Restmüll']);
     assert.deepEqual([nr1.ereignisse.at(-1).wohin, nr1.wohin], ['Sonstiges: Big Bag, Entsorger Muster', 'Sonstiges: Big Bag, Entsorger Muster']);

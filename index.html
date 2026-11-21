@@ -5066,17 +5066,21 @@ function blankoDruckDialog() {
       const win = window.open('', '_blank', 'width=900,height=760');
       if (!win) return 'Das Druckfenster wurde blockiert – bitte Pop-ups für LagerKit erlauben. Es wurde nichts reserviert.';
       win.document.write('<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>LagerKit</title></head><body style="font-family:Arial,sans-serif;padding:24px">LagerKit reserviert die Nummern für alle PCs …</body></html>'); win.document.close();
-      let r;
-      try { r = await nacheinander('einst', () => K.blankoReservieren(ioLagerKit(DATEI.einst), { n, wer: w.wer, mindest: lokalMax + 1, warten: nachpruefMs(), jetzt })); }
-      catch (e) { try { win.close(); } catch (x) { /* schon zu */ } return 'Nicht reserviert, nichts gedruckt: ' + (e.message || e.name); }
-      lokal.set('lagerkit-blanko-max', String(Math.max(lokalMax, r.bereich.bis)));
-      S.einst = await gemeinsamLaden('einst');
-      const codes = []; for (let i = r.bereich.von; i <= r.bereich.bis; i++) codes.push(K.bCode(i));
-      let ok = false;
-      try { ok = !win.closed && druckFenster('Blanko-Etiketten ' + codes[0] + '–' + codes[codes.length - 1], bogenHtml(codes.map(blankoEtikettHtml), start), DRUCK_CSS, win); } catch (e) { ok = false; }
-      toast(`${codes[0]} bis ${codes[codes.length - 1]} reserviert${ok ? ' und zum Drucken geöffnet' : ' – das Druckfenster war schon zu. Die Nummern bleiben reserviert und kommen nie wieder; bitte neu drucken'}.`, ok ? 'gut' : 'schlecht');
+      return nacheinander('blanko-druck', () => blankoReservierenUndDrucken(win, n, w.wer, start, lokalMax));
     } });
   const startB = startfeldVerdrahten('sfb');
+}
+/** Reservieren (sicher, für alle PCs) – erst danach den Bogen ins schon offene Fenster */
+async function blankoReservierenUndDrucken(win, n, wer, start, lokalMax) {
+  let r;
+  try { r = await nacheinander('einst', () => K.blankoReservieren(ioLagerKit(DATEI.einst), { n, wer, mindest: lokalMax + 1, warten: nachpruefMs(), jetzt })); }
+  catch (e) { try { win.close(); } catch (x) { /* schon zu */ } return 'Nicht reserviert, nichts gedruckt: ' + (e.message || e.name); }
+  lokal.set('lagerkit-blanko-max', String(Math.max(lokalMax, r.bereich.bis)));
+  S.einst = await gemeinsamLaden('einst');
+  const codes = []; for (let i = r.bereich.von; i <= r.bereich.bis; i++) codes.push(K.bCode(i));
+  let ok = false;
+  try { ok = !win.closed && druckFenster('Blanko-Etiketten ' + codes[0] + '–' + codes[codes.length - 1], bogenHtml(codes.map(blankoEtikettHtml), start), DRUCK_CSS, win); } catch (e) { ok = false; }
+  toast(`${codes[0]} bis ${codes[codes.length - 1]} reserviert${ok ? ' und zum Drucken geöffnet' : ' – das Druckfenster war schon zu. Die Nummern bleiben reserviert und kommen nie wieder; bitte neu drucken'}.`, ok ? 'gut' : 'schlecht');
 }
 /** Zu einer vergebenen Zuordnung springen (Projekt bzw. „Herkunft unklar“) */
 function blankoOeffnen(z) {
@@ -5106,7 +5110,8 @@ async function blankoFreiDialog(code, platz) {
     else blankoUnklarDialog(code, platz);
   }));
 }
-async function blankoInsProjekt(code, ordner, platz) {
+function blankoInsProjekt(code, ordner, platz) { return nacheinander('blanko-zuordnen', () => blankoInsProjektJetzt(code, ordner, platz)); }
+async function blankoInsProjektJetzt(code, ordner, platz) {
   const wer = werPflicht(); if (!wer) return;
   try {
     const dir = await S.archiv.getDirectoryHandle(ordner), nr = K.projektNr(ordner).nr, { lager } = await lagerLesen(dir, nr);
@@ -5142,22 +5147,25 @@ function blankoUnklarDialog(code, platz) {
       const was = K.text(String(fd.get('was') || ''), 300).trim(), gefunden = K.text(String(fd.get('gefunden') || ''), 300).trim(), pl = String(fd.get('platz') || ''), dt = String(fd.get('datum') || '').trim(), datum = K.ausDe(dt);
       if (!was) return 'Bitte „Was“ eintragen.'; if (!gefunden) return 'Bitte „Wo gefunden“ eintragen.'; if (!platzVon(pl)) return 'Bitte den Regalplatz wählen.';
       if (dt && !datum) return 'Datum bitte als TT.MM.JJJJ – oder leer lassen.';
-      const id = K.neueId(), am = jetzt();
-      const r = await nacheinander('einst', () => K.blankoZuordnen(ioLagerKit(DATEI.einst), { code, ordner: '', u: true, probe: id, wer: w.wer, am }, { warten: nachpruefMs() }));
-      S.einst = await gemeinsamLaden('einst');
-      if (r.schon) { $('dlg').close(); toast(esc(code) + ' gehört schon zu einer Probe – sie wird geöffnet.', 'schlecht'); blankoOeffnen(r.schon); return false; }
-      let neu;
-      await nacheinander('ohne', async () => {
-        const disk = K.dateiLesen('ohne', await leseText(S.lk, DATEI.ohne));
-        neu = { id, nr: K.naechsteNr((disk && !disk.kaputt && disk.proben) || []), erfasst: am, erfasstVon: w.wer, geaendert: am, was, ort: '', attribute: '', art: 'Sonstige', behaelter: '', probenahme: datum, probenahmeUnbekannt: !datum,
-          von: '', platz: pl, notiz: '', verdacht: false, quelle: null, nachtraeglich: !datum, gefunden, codes: [{ code, art: 'blanko', am, wer: w.wer }], fristen: [], sperren: [], plaetze: [], ereignisse: [], gedruckt: [], ansLabor: [], wohin: '' };
-        const d2 = await gemeinsamSchreiben('ohne', { eintraege: [neu] });
-        neu = d2.proben.find(x => x.id === id) || neu;
-      });
-      lokal.set('lagerkit-letzter-platz', pl);
-      toast(`${esc(code)} ist jetzt U${neu.nr} (Herkunft unklar).`, 'gut', { text: 'LagerKit-Etikett drucken', tun: () => { const u = uProbe(id); if (u) druckDialog([{ u: true, p: u }]); } });
-      neuZeichnen();
+      return nacheinander('blanko-zuordnen', () => blankoUnklarSpeichern(code, w, was, gefunden, pl, datum));
     } });
+}
+async function blankoUnklarSpeichern(code, w, was, gefunden, pl, datum) {
+  const id = K.neueId(), am = jetzt();
+  const r = await nacheinander('einst', () => K.blankoZuordnen(ioLagerKit(DATEI.einst), { code, ordner: '', u: true, probe: id, wer: w.wer, am }, { warten: nachpruefMs() }));
+  S.einst = await gemeinsamLaden('einst');
+  if (r.schon) { $('dlg').close(); toast(esc(code) + ' gehört schon zu einer Probe – sie wird geöffnet.', 'schlecht'); blankoOeffnen(r.schon); return false; }
+  let neu;
+  await nacheinander('ohne', async () => {
+    const disk = K.dateiLesen('ohne', await leseText(S.lk, DATEI.ohne));
+    neu = { id, nr: K.naechsteNr((disk && !disk.kaputt && disk.proben) || []), erfasst: am, erfasstVon: w.wer, geaendert: am, was, ort: '', attribute: '', art: 'Sonstige', behaelter: '', probenahme: datum, probenahmeUnbekannt: !datum,
+      von: '', platz: pl, notiz: '', verdacht: false, quelle: null, nachtraeglich: !datum, gefunden, codes: [{ code, art: 'blanko', am, wer: w.wer }], fristen: [], sperren: [], plaetze: [], ereignisse: [], gedruckt: [], ansLabor: [], wohin: '' };
+    const d2 = await gemeinsamSchreiben('ohne', { eintraege: [neu] });
+    neu = d2.proben.find(x => x.id === id) || neu;
+  });
+  lokal.set('lagerkit-letzter-platz', pl);
+  toast(`${esc(code)} ist jetzt U${neu.nr} (Herkunft unklar).`, 'gut', { text: 'LagerKit-Etikett drucken', tun: () => { const u = uProbe(id); if (u) druckDialog([{ u: true, p: u }]); } });
+  neuZeichnen();
 }
 
 /* ---------- Entsorgungslisten als feste Belege (Plan F6) ---------- */
